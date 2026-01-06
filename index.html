@@ -9,11 +9,12 @@
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;900&display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
     
-    <!-- Scripts: React, Babel, Tailwind -->
+    <!-- Scripts: React, Babel, Tailwind, Lucide -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
 
     <!-- Firebase SDKs (Compatibility Mode) -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
@@ -25,9 +26,7 @@
         .animate-spin-custom { animation: spin 1s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: #f1f1f1; }
         ::-webkit-scrollbar-thumb { background: #2ecc71; border-radius: 10px; }
-        .glass { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); }
     </style>
 </head>
 <body>
@@ -36,7 +35,6 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        // --- Firebase Config ---
         const firebaseConfig = {
             apiKey: "AIzaSyCic2l0BP5h6sEiPxPkVO7A6RaIVr77BIA",
             authDomain: "data-bridge-dd630.firebaseapp.com",
@@ -53,6 +51,7 @@
         const appId = "data-bridge";
 
         function App() {
+            const [isAuthReady, setIsAuthReady] = useState(false);
             const [dbUser, setDbUser] = useState(null);
             const [loading, setLoading] = useState(true);
             const [step, setStep] = useState('auth-email'); 
@@ -60,73 +59,81 @@
             const [password, setPassword] = useState('');
             const [error, setError] = useState('');
             
-            // Data States
             const [allUsers, setAllUsers] = useState([]);
             const [services, setServices] = useState([]);
             const [withdrawals, setWithdrawals] = useState([]);
             const [selectedMarketer, setSelectedMarketer] = useState(null);
             const [selectedReferral, setSelectedReferral] = useState(null);
             const [showServiceModal, setShowServiceModal] = useState(false);
+            const [showWithdrawModal, setShowWithdrawModal] = useState(false);
             const [serviceForm, setServiceForm] = useState({ name: '', price: '', status: 'جارية' });
+            const [withdrawForm, setWithdrawForm] = useState({ amount: '', number: '', method: 'Vodafone Cash' });
 
-            // 1. Initial Authentication (Silent Login)
+            // 1. بروتوكول المصادقة - حل مشكلة Restricted Operation
             useEffect(() => {
                 const initAuth = async () => {
                     try {
-                        await auth.signInAnonymously();
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            try {
+                                await auth.signInWithCustomToken(__initial_auth_token);
+                            } catch (e) {
+                                await auth.signInAnonymously();
+                            }
+                        } else {
+                            await auth.signInAnonymously();
+                        }
+                        setIsAuthReady(true);
                         setLoading(false);
                     } catch (e) {
                         console.error("Auth Failure:", e);
-                        setError("فشل الاتصال بالخادم. تأكد من تفعيل Anonymous Auth في Firebase.");
+                        setError("فشل الاتصال الأولي بالخادم. يرجى تفعيل Anonymous Auth.");
                         setLoading(false);
                     }
                 };
                 initAuth();
             }, []);
 
-            // 2. Real-time Data Sync (After Auth Success & Step Change)
+            // 2. مزامنة البيانات (بعد نجاح الدخول)
             useEffect(() => {
                 if (step === 'dashboard' && dbUser) {
-                    const baseRef = db.collection('artifacts').doc(appId).collection('public').doc('data');
-                    
-                    const unsubUsers = baseRef.collection('users').onSnapshot(snap => {
-                        setAllUsers(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-                    });
+                    const usersRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('users');
+                    const servicesRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('services');
+                    const withdrawRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('withdrawals');
 
-                    const unsubServices = baseRef.collection('services').onSnapshot(snap => {
-                        setServices(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-                    });
-
-                    const unsubWithdraw = baseRef.collection('withdrawals').onSnapshot(snap => {
-                        setWithdrawals(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-                    });
+                    const unsubUsers = usersRef.onSnapshot(snap => setAllUsers(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))), e => console.error(e));
+                    const unsubServices = servicesRef.onSnapshot(snap => setServices(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))), e => console.error(e));
+                    const unsubWithdraw = withdrawRef.onSnapshot(snap => setWithdrawals(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))), e => console.error(e));
 
                     return () => { unsubUsers(); unsubServices(); unsubWithdraw(); };
                 }
             }, [step, dbUser]);
 
-            // --- Handlers ---
             const checkEmail = async () => {
                 if (!email) return;
                 setError('');
                 setLoading(true);
                 try {
-                    const snap = await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('users')
-                        .where('email', '==', email.trim().toLowerCase()).get();
+                    // البحث عن المستخدم بالإيميل
+                    const usersRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('users');
+                    const snap = await usersRef.where('email', '==', email.trim().toLowerCase()).get();
                     
                     if (snap.empty) {
-                        setError('هذا الإيميل غير مسجل كإدارة أو مسوق. تواصل مع 01100665674');
+                        setError('هذا البريد غير مسجل. تواصل مع الإدارة: 01100665674');
                     } else {
-                        const data = snap.docs[0].data();
+                        const doc = snap.docs[0]; // الوثيقة الحقيقية
+                        const data = doc.data();  // بيانات الوثيقة
                         const role = data.role ? data.role.toLowerCase() : 'user';
+                        
                         if (role !== 'admin' && role !== 'marketer') {
-                            setError('عذراً، هذا الحساب لا يملك صلاحية دخول اللوحة.');
+                            setError('عذراً، هذا الحساب ليس له صلاحية دخول الداشبورد.');
                         } else {
-                            setDbUser(data);
+                            // التعديل الجوهري: جلب الـ ID الحقيقي (doc.id) وتخزينه في الـ State
+                            setDbUser({ ...data, uid: doc.id });
                             setStep(data.dashboardPassword ? 'auth-password' : 'setup-password');
                         }
                     }
                 } catch (e) {
+                    console.error("Firestore Fetch Error:", e);
                     setError('خطأ في الوصول لقاعدة البيانات. تأكد من إعداد القواعد (Rules).');
                 }
                 setLoading(false);
@@ -141,48 +148,57 @@
                 if (password.length < 6) { setError('6 أحرف على الأقل.'); return; }
                 setLoading(true);
                 try {
-                    await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('users').doc(dbUser.uid).update({ dashboardPassword: password });
+                    // استخدام الـ ID الحقيقي المستخرج في خطوة checkEmail
+                    const userRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('users').doc(dbUser.uid);
+                    await userRef.update({ dashboardPassword: password });
                     setStep('dashboard');
-                } catch (e) { setError("فشل حفظ الباسورد."); }
+                } catch(e) { 
+                    console.error("Save Password Error:", e);
+                    setError("فشل حفظ كلمة المرور. تأكد من نشر القواعد (Rules) المحدثة."); 
+                }
                 setLoading(false);
             };
 
             const addService = async () => {
                 const serviceData = { ...serviceForm, userId: selectedReferral.uid, userName: selectedReferral.name, marketerId: selectedMarketer.uid, price: parseFloat(serviceForm.price), timestamp: firebase.firestore.FieldValue.serverTimestamp() };
                 await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('services').add(serviceData);
-                
                 if (serviceForm.status === 'تم التنفيذ') {
                     const commission = parseFloat(serviceForm.price) * 0.1;
-                    await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('users').doc(selectedMarketer.uid).update({ 
-                        commissionBalance: firebase.firestore.FieldValue.increment(commission) 
-                    });
+                    await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('users').doc(selectedMarketer.uid).update({ commissionBalance: firebase.firestore.FieldValue.increment(commission) });
                 }
                 setShowServiceModal(false);
                 setServiceForm({ name: '', price: '', status: 'جارية' });
             };
 
+            const submitWithdraw = async () => {
+                const req = { ...withdrawForm, marketerId: dbUser.uid, marketerName: dbUser.name, status: 'معلق', timestamp: firebase.firestore.FieldValue.serverTimestamp() };
+                await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('withdrawals').add(req);
+                alert('تم إرسال الطلب بنجاح.');
+                setShowWithdrawModal(false);
+            };
+
             if (loading) return (
-                <div className="min-h-screen flex items-center justify-center bg-white"><div className="animate-spin-custom rounded-full h-12 w-12 border-t-4 border-emerald-500"></div></div>
+                <div className="min-h-screen flex items-center justify-center bg-white">
+                    <div className="animate-spin-custom rounded-full h-12 w-12 border-t-4 border-emerald-500"></div>
+                </div>
             );
 
             if (step !== 'dashboard') return (
                 <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
                     <div className="bg-white p-10 rounded-[40px] shadow-2xl w-full max-w-md border border-slate-100 text-center">
-                        <div className="w-20 h-20 bg-emerald-50 text-emerald-500 rounded-3xl flex items-center justify-center mx-auto mb-6"><i className="fas fa-shield-halved text-3xl"></i></div>
+                        <div className="w-20 h-20 bg-emerald-50 text-emerald-500 rounded-3xl flex items-center justify-center mx-auto mb-6"><i className="fas fa-shield-alt text-3xl"></i></div>
                         <h1 className="text-2xl font-black text-slate-800">بوابة داتا بريدج</h1>
-                        <p className="text-slate-400 mt-2 mb-8 font-bold">نظام الإدارة والمسوقين</p>
-
                         {error && <div className="bg-red-50 text-red-600 p-4 rounded-2xl text-sm mb-6 font-bold leading-relaxed">{error}</div>}
                         
                         {step === 'auth-email' && (
-                            <div className="space-y-4">
-                                <input type="email" className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-emerald-500 outline-none text-center font-bold" placeholder="البريد الإلكتروني" value={email} onChange={(e) => setEmail(e.target.value)}/>
-                                <button onClick={checkEmail} className="w-full py-4 bg-emerald-500 text-white rounded-2xl font-black text-lg shadow-lg">تحقق ودخول</button>
+                            <div className="space-y-5">
+                                <input type="email" className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-emerald-500 outline-none text-center font-bold" placeholder="بريدك الإلكتروني المعتمد" value={email} onChange={(e) => setEmail(e.target.value)}/>
+                                <button onClick={checkEmail} className="w-full py-4 bg-emerald-500 text-white rounded-2xl font-black text-lg shadow-lg">متابعة</button>
                             </div>
                         )}
 
                         {step === 'auth-password' && (
-                            <div className="space-y-4">
+                            <div className="space-y-5">
                                 <p className="text-sm font-bold">أهلاً {dbUser.name}، أدخل كلمة السر</p>
                                 <input type="password" className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-emerald-500 outline-none text-center text-2xl font-bold tracking-widest" value={password} onChange={(e) => setPassword(e.target.value)}/>
                                 <button onClick={handlePasswordLogin} className="w-full py-4 bg-emerald-500 text-white rounded-2xl font-black text-lg shadow-lg">دخول اللوحة</button>
@@ -190,85 +206,106 @@
                         )}
 
                         {step === 'setup-password' && (
-                            <div className="space-y-4">
+                            <div className="space-y-5">
                                 <p className="text-sm font-bold text-emerald-600">إنشاء كلمة سر للوحة التحكم</p>
                                 <input type="password" className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-emerald-500 outline-none text-center font-bold" placeholder="كلمة السر الجديدة" value={password} onChange={(e) => setPassword(e.target.value)}/>
-                                <button onClick={handleSetupPassword} className="w-full py-4 bg-emerald-500 text-white rounded-2xl font-black text-lg shadow-lg">تفعيل</button>
+                                <button onClick={handleSetupPassword} className="w-full py-4 bg-emerald-500 text-white rounded-2xl font-black text-lg shadow-lg">تفعيل الحساب</button>
                             </div>
                         )}
                     </div>
                 </div>
             );
 
-            // --- Dashboard Layout ---
             const isAdmin = dbUser.role.toLowerCase() === 'admin';
             const marketers = allUsers.filter(u => u.role && u.role.toLowerCase() === 'marketer');
             const myReferrals = allUsers.filter(u => u.referredBy === dbUser.uid);
 
             return (
-                <div className="min-h-screen pb-20">
-                    <nav className="bg-slate-900 text-white p-5 sticky top-0 z-50 flex justify-between items-center shadow-lg">
-                        <div className="flex items-center gap-3"><span className="font-black text-lg">DATA BRIDGE OPS</span></div>
-                        <button onClick={() => window.location.reload()} className="text-red-400 p-3 hover:bg-white/10 rounded-full transition-all"><i className="fas fa-power-off"></i></button>
+                <div className="min-h-screen text-right pb-20" dir="rtl">
+                    <nav className="bg-slate-900 text-white p-5 sticky top-0 z-50">
+                        <div className="max-w-7xl mx-auto flex justify-between items-center">
+                            <span className="font-black text-lg tracking-tighter">DATA BRIDGE ADMIN HUB</span>
+                            <button onClick={() => window.location.reload()} className="text-red-400 p-3 hover:bg-white/10 rounded-full transition-all"><i className="fas fa-power-off"></i></button>
+                        </div>
                     </nav>
 
                     <div className="max-w-7xl mx-auto p-4 md:p-10">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-                            <div className="bg-white p-8 rounded-[35px] shadow-sm border border-slate-100 text-center">
+                        {/* Summary Cards */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12 text-center">
+                            <div className="bg-white p-8 rounded-[35px] border border-slate-100 shadow-sm relative overflow-hidden">
+                                <div className="absolute top-0 right-0 w-2 h-full bg-emerald-500"></div>
                                 <p className="text-xs font-black text-slate-400 uppercase mb-4">{isAdmin ? 'المسوقين' : 'عملائي'}</p>
                                 <h3 className="text-5xl font-black text-slate-800">{isAdmin ? marketers.length : myReferrals.length}</h3>
                             </div>
-                            <div className="bg-white p-8 rounded-[35px] shadow-sm border border-slate-100 text-center">
-                                <p className="text-xs font-black text-slate-400 uppercase mb-4">{isAdmin ? 'إجمالي العمليات' : 'أرباحي'}</p>
+                            <div className="bg-white p-8 rounded-[35px] border border-slate-100 shadow-sm relative overflow-hidden">
+                                <div className="absolute top-0 right-0 w-2 h-full bg-blue-500"></div>
+                                <p className="text-xs font-black text-slate-400 uppercase mb-4">{isAdmin ? 'إجمالي الخدمات' : 'أرباحي'}</p>
                                 <h3 className="text-5xl font-black text-emerald-500">{isAdmin ? services.length : (dbUser.commissionBalance || 0).toFixed(0)} <span className="text-sm">ج.م</span></h3>
                             </div>
-                            <div className="bg-white p-8 rounded-[35px] shadow-sm border border-slate-100 text-center">
-                                <p className="text-xs font-black text-slate-400 uppercase mb-4">الدور الوظيفي</p>
-                                <h3 className="text-2xl font-black text-slate-600 uppercase">{isAdmin ? 'ADMIN' : 'MARKETER'}</h3>
+                            <div className="bg-white p-8 rounded-[35px] border border-slate-100 shadow-sm relative overflow-hidden">
+                                <div className="absolute top-0 right-0 w-2 h-full bg-slate-800"></div>
+                                <p className="text-xs font-black text-slate-400 uppercase mb-4">الرتبة</p>
+                                <h3 className="text-2xl font-black text-slate-600 uppercase tracking-widest">{isAdmin ? 'ADMIN' : 'MARKETER'}</h3>
+                                {!isAdmin && (dbUser.commissionBalance || 0) >= 100 && <button onClick={() => setShowWithdrawModal(true)} className="mt-4 w-full py-2 bg-emerald-500 text-white rounded-xl font-bold shadow-lg">سحب الأرباح</button>}
                             </div>
                         </div>
 
                         {isAdmin ? (
-                            /* ADMIN VIEW */
-                            <div className="bg-white rounded-[40px] shadow-sm border border-slate-100 overflow-hidden">
-                                <div className="p-8 border-b bg-slate-50/50"><h2 className="font-black text-2xl">إدارة المسوقين</h2></div>
-                                <div className="divide-y divide-slate-50">
-                                    {marketers.length === 0 && <div className="p-20 text-center text-slate-400">لا يوجد مسوقين مسجلين بعد.</div>}
-                                    {marketers.map(m => (
-                                        <div key={m.id} className="p-8 hover:bg-slate-50 transition-all">
-                                            <div className="flex flex-wrap justify-between items-center gap-6">
-                                                <div><h4 className="font-black text-xl">{m.name}</h4><p className="text-sm text-slate-400">{m.email}</p></div>
-                                                <div className="flex gap-6 items-center">
-                                                    <button onClick={() => { setSelectedMarketer(m); setSelectedReferral(null); }} className="bg-slate-900 text-white px-5 py-2 rounded-full text-xs font-black hover:bg-emerald-500">
-                                                        {allUsers.filter(u => u.referredBy === m.uid).length} عملاء
-                                                    </button>
-                                                    <p className="font-black text-xl">{m.commissionBalance || 0}ج</p>
+                            <div className="space-y-8">
+                                {withdrawals.filter(w => w.status === 'معلق').length > 0 && (
+                                    <div className="bg-amber-50 border-2 border-amber-200 p-8 rounded-[40px]">
+                                        <h3 className="font-black mb-6 flex items-center gap-3 text-amber-800"><i className="fas fa-hand-holding-usd"></i> طلبات سحب معلقة:</h3>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            {withdrawals.filter(w => w.status === 'معلق').map(w => (
+                                                <div key={w.id} className="bg-white p-5 rounded-3xl flex justify-between items-center shadow-sm border border-amber-100">
+                                                    <div><p className="font-black text-slate-800">{w.marketerName}</p><p className="text-xs font-bold text-slate-500">{w.amount} ج.م | {w.number} ({w.method})</p></div>
+                                                    <button onClick={async () => await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('withdrawals').doc(w.id).update({ status: 'تم الدفع' })} className="bg-emerald-500 text-white px-5 py-2 rounded-xl text-xs font-black">تأكيد الدفع</button>
                                                 </div>
-                                            </div>
-                                            {selectedMarketer?.uid === m.uid && (
-                                                <div className="mt-8 bg-slate-100 p-8 rounded-[30px] grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in">
-                                                    {allUsers.filter(u => u.referredBy === m.uid).map(ref => (
-                                                        <div key={ref.id} className="bg-white p-5 rounded-2xl flex justify-between items-center shadow-sm">
-                                                            <div><p className="font-black">{ref.name}</p><p className="text-xs text-slate-400">{ref.phone}</p></div>
-                                                            <button onClick={() => { setSelectedReferral(ref); setShowServiceModal(true); }} className="w-10 h-10 bg-emerald-500 text-white rounded-xl shadow-lg shadow-emerald-100"><i className="fas fa-plus"></i></button>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            )}
+                                            ))}
                                         </div>
-                                    ))}
+                                    </div>
+                                )}
+                                <div className="bg-white rounded-[40px] shadow-sm border border-slate-100 overflow-hidden">
+                                    <div className="p-8 border-b bg-slate-50/50 flex justify-between items-center"><h2 className="font-black text-2xl text-slate-800 italic uppercase">MARKETERS MANAGEMENT</h2></div>
+                                    <div className="divide-y divide-slate-50">
+                                        {marketers.map(m => (
+                                            <div key={m.id} className="p-8 hover:bg-slate-50 transition-all group">
+                                                <div className="flex flex-wrap justify-between items-center gap-6">
+                                                    <div><h4 className="font-black text-xl text-slate-800">{m.name}</h4><p className="text-sm text-slate-400 font-bold">{m.email}</p></div>
+                                                    <div className="flex gap-6 items-center">
+                                                        <button onClick={() => { setSelectedMarketer(m); setSelectedReferral(null); }} className="bg-slate-900 text-white px-5 py-2 rounded-full text-xs font-black hover:bg-emerald-500 transition-all">
+                                                            {allUsers.filter(u => u.referredBy === m.uid).length} عملاء
+                                                        </button>
+                                                        <p className="font-black text-xl text-slate-800">{m.commissionBalance || 0}ج</p>
+                                                    </div>
+                                                </div>
+                                                {selectedMarketer?.uid === m.uid && (
+                                                    <div className="mt-8 bg-slate-100 p-8 rounded-[30px] animate-in fade-in border border-slate-200 shadow-inner">
+                                                        <div className="flex justify-between mb-6"><h5 className="font-black text-slate-500">شجرة عملاء المسوق: {m.name}</h5><button onClick={() => setSelectedMarketer(null)} className="text-red-400 hover:scale-110 transition-all"><i className="fas fa-times-circle text-2xl"></i></button></div>
+                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                            {allUsers.filter(u => u.referredBy === m.uid).map(ref => (
+                                                                <div key={ref.id} className="bg-white p-5 rounded-2xl flex justify-between items-center border border-slate-200 shadow-sm">
+                                                                    <div><p className="font-black text-slate-800">{ref.name}</p><p className="text-xs text-slate-400 font-bold">{ref.phone}</p></div>
+                                                                    <button onClick={() => { setSelectedReferral(ref); setShowServiceModal(true); }} className="w-10 h-10 bg-emerald-500 text-white rounded-xl shadow-lg shadow-emerald-100 hover:scale-105 transition-all"><i className="fas fa-plus"></i></button>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
                             </div>
                         ) : (
-                            /* MARKETER VIEW */
-                            <div className="bg-white rounded-[40px] shadow-sm border border-slate-100 overflow-hidden p-8">
-                                <h2 className="font-black text-2xl mb-8">عملائي المسجلين</h2>
-                                <div className="divide-y">
-                                    {myReferrals.length === 0 ? <p className="text-center py-20 opacity-50">لا يوجد عملاء بعد.</p> : myReferrals.map(ref => (
-                                        <div key={ref.id} className="py-6 flex justify-between items-center hover:bg-slate-50 transition-all rounded-2xl px-4">
-                                            <div><p className="font-black text-lg">{ref.name}</p><p className="text-xs text-slate-400">{ref.phone}</p></div>
+                            <div className="bg-white rounded-[40px] shadow-sm border border-slate-100 overflow-hidden">
+                                <div className="p-8 border-b bg-slate-50/50 flex justify-between items-center"><h2 className="font-black text-2xl text-slate-800 italic uppercase">MY CLIENTS LIST</h2></div>
+                                <div className="divide-y divide-slate-100">
+                                    {myReferrals.length === 0 ? <div className="p-24 text-center text-slate-300 font-black uppercase text-2xl tracking-widest opacity-20">NO CLIENTS YET</div> : myReferrals.map(ref => (
+                                        <div key={ref.id} className="p-8 flex justify-between items-center hover:bg-slate-50 transition-all group">
+                                            <div><h4 className="font-black text-lg text-slate-800">{ref.name}</h4><p className="text-xs text-slate-400 font-bold">{ref.phone}</p></div>
                                             <div className="text-left space-y-1">
-                                                {services.filter(s => s.userId === ref.uid).map(s => <span key={s.id} className={`text-[10px] px-3 py-1 rounded-full font-black block ${s.status === 'تم التنفيذ' ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-500'}`}>{s.name}: {s.status}</span>)}
+                                                {services.filter(s => s.userId === ref.uid).map(s => <span key={s.id} className={`text-[10px] px-3 py-1 rounded-full font-black block border ${s.status === 'تم التنفيذ' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-slate-50 text-slate-500 border-slate-100'}`}>{s.name}: {s.status}</span>)}
                                             </div>
                                         </div>
                                     ))}
@@ -279,15 +316,33 @@
 
                     {showServiceModal && (
                         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-                            <div className="bg-white rounded-[40px] p-10 w-full max-w-md shadow-2xl">
-                                <h3 className="text-2xl font-black mb-8 text-right">تسجيل خدمة لـ {selectedReferral?.name}</h3>
-                                <div className="space-y-4">
-                                    <input className="w-full p-4 bg-slate-50 rounded-2xl outline-none font-bold text-right" placeholder="اسم الخدمة" value={serviceForm.name} onChange={e => setServiceForm({...serviceForm, name: e.target.value})}/>
-                                    <input className="w-full p-4 bg-slate-50 rounded-2xl outline-none font-bold text-right" type="number" placeholder="السعر" value={serviceForm.price} onChange={e => setServiceForm({...serviceForm, price: e.target.value})}/>
-                                    <select className="w-full p-4 bg-slate-50 rounded-2xl outline-none font-bold text-right" value={serviceForm.status} onChange={e => setServiceForm({...serviceForm, status: e.target.value})}>
+                            <div className="bg-white rounded-[40px] p-10 w-full max-w-md shadow-2xl text-right">
+                                <h3 className="text-2xl font-black mb-8 border-r-4 border-emerald-500 pr-4">تسجيل خدمة لـ {selectedReferral?.name}</h3>
+                                <div className="space-y-4 text-right">
+                                    <input className="w-full p-4 bg-slate-50 rounded-2xl outline-none font-bold border-2 border-transparent focus:border-emerald-500 transition-all" placeholder="اسم الخدمة" value={serviceForm.name} onChange={e => setServiceForm({...serviceForm, name: e.target.value})}/>
+                                    <input className="w-full p-4 bg-slate-50 rounded-2xl outline-none font-bold border-2 border-transparent focus:border-emerald-500 transition-all" type="number" placeholder="السعر" value={serviceForm.price} onChange={e => setServiceForm({...serviceForm, price: e.target.value})}/>
+                                    <select className="w-full p-4 bg-slate-50 rounded-2xl outline-none font-bold border-2 border-transparent focus:border-emerald-500 transition-all" value={serviceForm.status} onChange={e => setServiceForm({...serviceForm, status: e.target.value})}>
                                         <option>جارية</option><option>تم التنفيذ</option><option>تم الرفض</option>
                                     </select>
-                                    <div className="grid grid-cols-2 gap-4 mt-8"><button onClick={addService} className="bg-emerald-500 text-white py-4 rounded-2xl font-black shadow-lg">تأكيد</button><button onClick={() => setShowServiceModal(false)} className="bg-slate-100 text-slate-500 py-4 rounded-2xl font-black">إلغاء</button></div>
+                                    <div className="grid grid-cols-2 gap-4 mt-8"><button onClick={addService} className="bg-emerald-500 text-white py-4 rounded-2xl font-black shadow-lg shadow-emerald-100 active:scale-95 transition-all">تأكيد الحفظ</button><button onClick={() => setShowServiceModal(false)} className="bg-slate-100 text-slate-500 py-4 rounded-2xl font-black active:scale-95 transition-all">إلغاء</button></div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {showWithdrawModal && (
+                        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+                            <div className="bg-white rounded-[40px] p-10 w-full max-w-md shadow-2xl text-right">
+                                <h3 className="text-2xl font-black mb-2 border-r-4 border-blue-500 pr-4">سحب الأرباح</h3>
+                                <p className="text-slate-400 font-bold mb-8 italic text-sm pr-4">رصيدك القابل للسحب حالياً: {dbUser.commissionBalance} ج.م</p>
+                                <div className="space-y-4 text-right">
+                                    <input className="w-full p-4 bg-slate-50 rounded-2xl outline-none font-bold text-lg" type="number" placeholder="المبلغ المطلوب" value={withdrawForm.amount} onChange={e => setWithdrawForm({...withdrawForm, amount: e.target.value})}/>
+                                    <input className="w-full p-4 bg-slate-50 rounded-2xl outline-none font-bold" placeholder="رقم المحفظة / الحساب" value={withdrawForm.number} onChange={e => setWithdrawForm({...withdrawForm, number: e.target.value})}/>
+                                    <select className="w-full p-4 bg-slate-50 rounded-2xl outline-none font-bold" value={withdrawForm.method} onChange={e => setWithdrawForm({...withdrawForm, method: e.target.value})}>
+                                        <option value="Vodafone Cash">فودافون كاش</option>
+                                        <option value="InstaPay">انستا باي</option>
+                                    </select>
+                                    <div className="grid grid-cols-2 gap-4 mt-8"><button onClick={submitWithdraw} className="bg-emerald-500 text-white py-4 rounded-2xl font-black shadow-lg active:scale-95 transition-all">إرسال الطلب</button><button onClick={() => setShowWithdrawModal(false)} className="bg-slate-100 text-slate-500 py-4 rounded-2xl font-black active:scale-95 transition-all">إلغاء</button></div>
                                 </div>
                             </div>
                         </div>
