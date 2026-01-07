@@ -22,14 +22,16 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 
     <style>
-        body { font-family: 'Cairo', sans-serif; background-color: #f1f5f9; scroll-behavior: smooth; }
+        body { font-family: 'Cairo', sans-serif; background-color: #f8fafc; scroll-behavior: smooth; }
         .animate-spin-custom { animation: spin 1s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: #f1f1f1; }
         ::-webkit-scrollbar-thumb { background: #2ecc71; border-radius: 10px; }
-        .glass-nav { background: rgba(15, 23, 42, 0.9); backdrop-filter: blur(10px); }
-        .stat-card-gradient { background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%); }
+        .glass-nav { background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(12px); }
+        .stat-card { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        .stat-card:hover { transform: translateY(-5px); box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1); }
+        .gradient-border { border-image: linear-gradient(to right, #2ecc71, #27ae60) 1; }
     </style>
 </head>
 <body>
@@ -75,30 +77,27 @@
             const [serviceForm, setServiceForm] = useState({ name: '', price: '', status: 'جارية' });
             const [withdrawForm, setWithdrawForm] = useState({ amount: '', number: '', method: 'Vodafone Cash' });
 
-            // 1. بروتوكول حفظ الجلسة واستعادة الدخول (Session Persistence)
+            // 1. Persistence & Auto-Login
             useEffect(() => {
                 const init = async () => {
                     try {
                         await auth.signInAnonymously();
-                        
-                        // محاولة استعادة الجلسة من LocalStorage
-                        const savedSession = localStorage.getItem('db_ops_session');
+                        const savedSession = localStorage.getItem('db_ops_session_v2');
                         if (savedSession) {
                             const parsed = JSON.parse(savedSession);
                             setDbUser(parsed);
                             setStep('dashboard');
                         }
-                        
                         setLoading(false);
                     } catch (e) {
-                        setError("فشل الاتصال بالخادم الرئيسي.");
+                        setError("خطأ في الاتصال بالسيرفر.");
                         setLoading(false);
                     }
                 };
                 init();
             }, []);
 
-            // 2. مزامنة البيانات اللحظية
+            // 2. Real-time Listeners
             useEffect(() => {
                 if (step === 'dashboard' && dbUser) {
                     const baseRef = db.collection('artifacts').doc(appId).collection('public').doc('data');
@@ -109,7 +108,6 @@
 
                     const unsubServices = baseRef.collection('services').onSnapshot(snap => {
                         const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                        // ترتيب حسب التاريخ الأحدث
                         setServices(data.sort((a,b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0)));
                     });
 
@@ -121,7 +119,7 @@
                         if(doc.exists) {
                             const updatedMe = { ...doc.data(), uid: doc.id };
                             setDbUser(updatedMe);
-                            localStorage.setItem('db_ops_session', JSON.stringify(updatedMe)); // تحديث التخزين
+                            localStorage.setItem('db_ops_session_v2', JSON.stringify(updatedMe));
                         }
                     });
 
@@ -129,7 +127,7 @@
                 }
             }, [step]);
 
-            // --- Business Logic ---
+            // --- Handlers ---
             const checkEmail = async () => {
                 if (!email) return;
                 setError('');
@@ -139,33 +137,32 @@
                         .where('email', '==', email.trim().toLowerCase()).get();
                     
                     if (snap.empty) {
-                        setError('الإيميل غير مسجل كإدارة أو مسوق.');
+                        setError('هذا الإيميل غير مسجل في النظام.');
                     } else {
                         const doc = snap.docs[0];
                         const data = doc.data();
                         const role = data.role ? data.role.toLowerCase() : 'user';
                         if (role !== 'admin' && role !== 'marketer') {
-                            setError('لا تملك صلاحية دخول غرفة العمليات.');
+                            setError('لا تملك صلاحية دخول الأدمن.');
                         } else {
-                            const userData = { ...data, uid: doc.id };
-                            setDbUser(userData);
+                            setDbUser({ ...data, uid: doc.id });
                             setStep(data.dashboardPassword ? 'auth-password' : 'setup-password');
                         }
                     }
-                } catch (e) { setError('خطأ في جلب البيانات.'); }
+                } catch (e) { setError('خطأ في استرجاع البيانات.'); }
                 setLoading(false);
             };
 
             const handlePasswordLogin = () => {
                 if (password === dbUser.dashboardPassword) {
-                    localStorage.setItem('db_ops_session', JSON.stringify(dbUser)); // حفظ الجلسة
+                    localStorage.setItem('db_ops_session_v2', JSON.stringify(dbUser));
                     setStep('dashboard');
                 } else setError('كلمة المرور غير صحيحة.');
             };
 
             const handleLogout = () => {
-                if(confirm("هل تريد الخروج وإغلاق الجلسة؟")) {
-                    localStorage.removeItem('db_ops_session');
+                if(confirm("إغلاق الجلسة؟")) {
+                    localStorage.removeItem('db_ops_session_v2');
                     window.location.reload();
                 }
             };
@@ -191,8 +188,17 @@
                 setServiceForm({ name: '', price: '', status: 'جارية' });
             };
 
+            const submitWithdraw = async () => {
+                const amount = parseFloat(withdrawForm.amount);
+                if (amount > (dbUser.commissionBalance || 0)) { alert("الرصيد غير كافٍ!"); return; }
+                const req = { ...withdrawForm, marketerId: dbUser.uid, marketerName: dbUser.name, status: 'معلق', timestamp: firebase.firestore.FieldValue.serverTimestamp() };
+                await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('withdrawals').add(req);
+                alert("تم إرسال الطلب.");
+                setShowWithdrawModal(false);
+            };
+
             const confirmWithdrawal = async (id) => {
-                if(confirm("تأكيد دفع هذا المبلغ للمسوق؟")) {
+                if(confirm("هل تم تحويل المبلغ للمسوق بالفعل؟")) {
                     await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('withdrawals').doc(id).update({
                         status: 'تم الدفع',
                         paidAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -200,169 +206,174 @@
                 }
             };
 
-            // --- Calculations for Stats ---
+            // --- Stats Calculation ---
             const stats = useMemo(() => {
-                const totalRevenue = services.filter(s => s.status === 'تم التنفيذ').reduce((acc, curr) => acc + (curr.price || 0), 0);
-                const pendingWithdraws = withdrawals.filter(w => w.status === 'معلق').length;
-                const totalUsers = allUsers.length;
-                const activeMarketers = allUsers.filter(u => u.role?.toLowerCase() === 'marketer').length;
-                return { totalRevenue, pendingWithdraws, totalUsers, activeMarketers };
+                const finishedServices = services.filter(s => s.status === 'تم التنفيذ');
+                const totalRevenue = finishedServices.reduce((acc, curr) => acc + (curr.price || 0), 0);
+                const totalCommission = finishedServices.reduce((acc, curr) => acc + ((curr.price || 0) * 0.1), 0);
+                const pendingWithdrawsCount = withdrawals.filter(w => w.status === 'معلق').length;
+                const totalUsersCount = allUsers.length;
+                const marketersCount = allUsers.filter(u => u.role?.toLowerCase() === 'marketer').length;
+                return { totalRevenue, totalCommission, pendingWithdrawsCount, totalUsersCount, marketersCount };
             }, [services, withdrawals, allUsers]);
 
-            // --- UI Renders ---
+            // --- Fixed Variables (ReferenceError Fix) ---
+            const isAdmin = dbUser?.role?.toLowerCase() === 'admin';
+            const marketersList = allUsers.filter(u => u.role?.toLowerCase() === 'marketer');
+            const myReferralsList = allUsers.filter(u => u.referredBy === dbUser?.uid);
+
             if (loading) return (
-                <div className="min-h-screen flex items-center justify-center bg-slate-900 text-emerald-500">
+                <div className="min-h-screen flex items-center justify-center bg-slate-900">
                     <div className="text-center">
                         <div className="animate-spin-custom rounded-full h-16 w-16 border-t-4 border-emerald-500 mb-4 mx-auto"></div>
-                        <p className="font-black text-white tracking-widest uppercase">Initializing Ops Center...</p>
+                        <p className="text-white font-bold tracking-tighter opacity-50">DATA BRIDGE OS LOADING...</p>
                     </div>
                 </div>
             );
 
             if (step !== 'dashboard') return (
-                <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4">
-                    <div className="bg-white p-10 rounded-[45px] shadow-2xl w-full max-w-md border-t-[10px] border-emerald-500 text-center relative overflow-hidden">
-                        <div className="w-20 h-20 bg-emerald-50 text-emerald-500 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-inner">
-                            <i className="fas fa-fingerprint text-3xl"></i>
+                <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
+                    <div className="bg-white p-12 rounded-[50px] shadow-2xl w-full max-w-md border-b-8 border-emerald-500 text-center">
+                        <div className="w-24 h-24 bg-emerald-50 text-emerald-600 rounded-[35px] flex items-center justify-center mx-auto mb-8 shadow-inner">
+                            <i className="fas fa-shield-virus text-4xl"></i>
                         </div>
-                        <h1 className="text-2xl font-black text-slate-800">غرفة العمليات</h1>
-                        <p className="text-slate-400 mt-1 mb-8 font-bold">Data Bridge Security Layer</p>
+                        <h1 className="text-3xl font-black text-slate-900 mb-2">Ops Center</h1>
+                        <p className="text-slate-400 font-bold mb-10 text-sm uppercase tracking-widest">Authorized Access Only</p>
 
-                        {error && <div className="bg-red-50 text-red-600 p-4 rounded-2xl text-sm mb-6 font-bold">{error}</div>}
+                        {error && <div className="bg-red-50 text-red-600 p-4 rounded-3xl text-sm mb-6 font-bold">{error}</div>}
                         
                         {step === 'auth-email' && (
                             <div className="space-y-4">
-                                <input type="email" className="w-full p-5 rounded-2xl bg-slate-100 border-2 border-transparent focus:border-emerald-500 outline-none text-center font-bold transition-all" placeholder="الإيميل المعتمد" value={email} onChange={(e) => setEmail(e.target.value)}/>
-                                <button onClick={checkEmail} className="w-full py-4 bg-emerald-500 text-white rounded-2xl font-black text-lg shadow-lg shadow-emerald-200 active:scale-95 transition-all">تحقق من الصلاحية</button>
+                                <input type="email" className="w-full p-5 rounded-3xl bg-slate-50 border-2 border-transparent focus:border-emerald-500 outline-none text-center font-bold transition-all" placeholder="البريد الإلكتروني" value={email} onChange={(e) => setEmail(e.target.value)}/>
+                                <button onClick={checkEmail} className="w-full py-5 bg-slate-900 text-white rounded-3xl font-black text-lg shadow-xl active:scale-95 transition-all">تحديد الهوية</button>
                             </div>
                         )}
 
                         {step === 'auth-password' && (
                             <div className="space-y-4">
-                                <p className="text-sm font-bold text-slate-600">أهلاً {dbUser.name}، أدخل مفتاح العبور</p>
-                                <input type="password" className="w-full p-5 rounded-2xl bg-slate-100 border-2 border-transparent focus:border-emerald-500 outline-none text-center text-3xl tracking-[15px] font-black transition-all" value={password} onChange={(e) => setPassword(e.target.value)}/>
-                                <button onClick={handlePasswordLogin} className="w-full py-4 bg-emerald-500 text-white rounded-2xl font-black text-lg shadow-lg active:scale-95 transition-all">دخول النظام</button>
+                                <p className="text-sm font-bold text-slate-500">مرحباً {dbUser.name}، أدخل رمز الدخول</p>
+                                <input type="password" className="w-full p-5 rounded-3xl bg-slate-50 border-2 border-transparent focus:border-emerald-500 outline-none text-center text-4xl font-black tracking-[10px] transition-all" value={password} onChange={(e) => setPassword(e.target.value)}/>
+                                <button onClick={handlePasswordLogin} className="w-full py-5 bg-emerald-500 text-white rounded-3xl font-black text-lg shadow-xl shadow-emerald-200 active:scale-95 transition-all">فتح اللوحة</button>
                             </div>
                         )}
-
-                        {step === 'setup-password' && (
-                            <div className="space-y-4">
-                                <p className="text-sm font-bold text-emerald-600">إنشاء كلمة سر للوحة التحكم</p>
-                                <input type="password" className="w-full p-5 rounded-2xl bg-slate-100 border-2 border-transparent focus:border-emerald-500 outline-none text-center font-bold" placeholder="كلمة السر الجديدة" value={password} onChange={(e) => setPassword(e.target.value)}/>
-                                <button onClick={handleSetupPassword} className="w-full py-4 bg-emerald-500 text-white rounded-2xl font-black text-lg">تفعيل الجلسة</button>
-                            </div>
-                        )}
-                        <p className="text-[10px] text-slate-300 mt-8 font-black uppercase tracking-widest">Encrypted Session System</p>
                     </div>
                 </div>
             );
 
-            // --- Dashboard Body ---
-            const isAdmin = dbUser.role?.toLowerCase() === 'admin';
-
             return (
                 <div className="min-h-screen">
-                    {/* Professional Navbar */}
-                    <nav className="glass-nav text-white p-4 sticky top-0 z-50 shadow-lg border-b border-white/5">
+                    {/* Header */}
+                    <nav className="glass-nav text-white p-4 sticky top-0 z-50 border-b border-white/5">
                         <div className="max-w-7xl mx-auto flex justify-between items-center">
-                            <div className="flex items-center gap-4">
-                                <div className="bg-emerald-500 w-10 h-10 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-500/30"><i className="fas fa-rocket"></i></div>
-                                <div className="leading-tight">
-                                    <span className="font-black text-lg block tracking-tighter uppercase">DATA BRIDGE</span>
-                                    <span className="text-[9px] font-black text-emerald-400 uppercase">Operating System 2.0</span>
-                                </div>
+                            <div className="flex items-center gap-3">
+                                <div className="bg-emerald-500 p-2 rounded-xl shadow-lg shadow-emerald-500/30"><i className="fas fa-cube text-white"></i></div>
+                                <span className="font-black text-xl tracking-tighter uppercase italic">Data Bridge <span className="text-emerald-400">Ops</span></span>
                             </div>
-                            <div className="flex items-center gap-6">
-                                <div className="text-left hidden md:block border-l border-white/10 pl-6">
-                                    <p className="text-[10px] font-bold opacity-50 uppercase tracking-widest">Operator</p>
-                                    <p className="text-sm font-black">{dbUser.name}</p>
+                            <div className="flex items-center gap-4">
+                                <div className="hidden md:block text-left border-l border-white/10 pl-4">
+                                    <p className="text-[9px] font-black opacity-40 uppercase tracking-widest leading-none mb-1">System Operator</p>
+                                    <p className="text-sm font-black text-white leading-none">{dbUser.name}</p>
                                 </div>
-                                <button onClick={handleLogout} className="w-10 h-10 rounded-xl bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition-all border border-red-500/20"><i className="fas fa-power-off"></i></button>
+                                <button onClick={handleLogout} className="bg-white/5 p-3 rounded-xl hover:bg-red-500 transition-all border border-white/5"><i className="fas fa-power-off text-sm"></i></button>
                             </div>
                         </div>
                     </nav>
 
                     <div className="max-w-7xl mx-auto p-4 md:p-8">
-                        
                         {isAdmin ? (
-                            /* --- ADMIN PRO VIEW --- */
-                            <div className="space-y-8">
-                                {/* 1. Stats Row */}
+                            /* --- ADMIN DASHBOARD --- */
+                            <div className="space-y-10">
+                                {/* 1. Professional Stats Grid */}
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                                    <div className="stat-card-gradient p-8 rounded-[35px] border border-white shadow-sm">
-                                        <p className="text-xs font-black text-slate-400 uppercase mb-4 tracking-widest">إجمالي المبيعات</p>
-                                        <h3 className="text-4xl font-black text-slate-800">{stats.totalRevenue.toLocaleString()} <span className="text-sm text-slate-300">ج.م</span></h3>
+                                    <div className="stat-card bg-white p-8 rounded-[40px] border border-slate-100 relative overflow-hidden">
+                                        <div className="absolute -right-4 -bottom-4 text-emerald-500/5 text-7xl"><i className="fas fa-coins"></i></div>
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">إجمالي المبيعات</p>
+                                        <h3 className="text-3xl font-black text-slate-800">{stats.totalRevenue.toLocaleString()} <span className="text-sm opacity-30">ج.م</span></h3>
                                     </div>
-                                    <div className="stat-card-gradient p-8 rounded-[35px] border border-white shadow-sm">
-                                        <p className="text-xs font-black text-slate-400 uppercase mb-4 tracking-widest">قاعدة العملاء</p>
-                                        <h3 className="text-4xl font-black text-slate-800">{stats.totalUsers} <span className="text-sm text-slate-300">عضو</span></h3>
+                                    <div className="stat-card bg-white p-8 rounded-[40px] border border-slate-100 relative overflow-hidden">
+                                        <div className="absolute -right-4 -bottom-4 text-blue-500/5 text-7xl"><i className="fas fa-users"></i></div>
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">إجمالي العملاء</p>
+                                        <h3 className="text-3xl font-black text-slate-800">{stats.totalUsersCount} <span className="text-sm opacity-30 text-blue-300">عضو</span></h3>
                                     </div>
-                                    <div className="stat-card-gradient p-8 rounded-[35px] border border-white shadow-sm">
-                                        <p className="text-xs font-black text-slate-400 uppercase mb-4 tracking-widest">جيش المسوقين</p>
-                                        <h3 className="text-4xl font-black text-emerald-500">{stats.activeMarketers} <span className="text-sm text-emerald-200">مسوق</span></h3>
+                                    <div className="stat-card bg-white p-8 rounded-[40px] border border-slate-100 relative overflow-hidden border-b-4 border-b-emerald-500">
+                                        <div className="absolute -right-4 -bottom-4 text-emerald-500/5 text-7xl"><i className="fas fa-user-tie"></i></div>
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">المسوقين</p>
+                                        <h3 className="text-3xl font-black text-emerald-600">{stats.marketersCount}</h3>
                                     </div>
-                                    <div className="stat-card-gradient p-8 rounded-[35px] border border-white shadow-sm">
-                                        <p className="text-xs font-black text-slate-400 uppercase mb-4 tracking-widest">طلبات سحب</p>
-                                        <h3 className={`text-4xl font-black ${stats.pendingWithdraws > 0 ? 'text-red-500 animate-pulse' : 'text-slate-800'}`}>{stats.pendingWithdraws}</h3>
+                                    <div className="stat-card bg-white p-8 rounded-[40px] border border-slate-100 relative overflow-hidden border-b-4 border-b-amber-500">
+                                        <div className="absolute -right-4 -bottom-4 text-amber-500/5 text-7xl"><i className="fas fa-wallet"></i></div>
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">طلبات السحب</p>
+                                        <h3 className={`text-3xl font-black ${stats.pendingWithdrawsCount > 0 ? 'text-amber-600' : 'text-slate-300'}`}>{stats.pendingWithdrawsCount}</h3>
                                     </div>
                                 </div>
 
                                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                                    {/* 2. Management List (Left 2 Columns) */}
-                                    <div className="lg:col-span-2 space-y-8">
-                                        {/* Pending Withdrawals Detailed */}
+                                    {/* Column 1 & 2: Main Management */}
+                                    <div className="lg:col-span-2 space-y-10">
+                                        {/* Financial Section: Withdrawals */}
                                         {withdrawals.filter(w => w.status === 'معلق').length > 0 && (
-                                            <div className="bg-amber-50 border-2 border-amber-200 p-8 rounded-[40px] shadow-sm">
-                                                <h3 className="font-black text-amber-900 mb-6 flex items-center gap-3"><i className="fas fa-hourglass-half"></i> طلبات سحب تحتاج موافقة:</h3>
-                                                <div className="space-y-3">
+                                            <div className="bg-amber-900 text-white p-8 rounded-[45px] shadow-2xl shadow-amber-900/20">
+                                                <h3 className="font-black text-xl mb-6 flex items-center gap-3"><i className="fas fa-bell animate-bounce"></i> طلبات سحب قيد الانتظار</h3>
+                                                <div className="space-y-4">
                                                     {withdrawals.filter(w => w.status === 'معلق').map(w => (
-                                                        <div key={w.id} className="bg-white p-5 rounded-3xl flex justify-between items-center border border-amber-100">
+                                                        <div key={w.id} className="bg-white/10 p-6 rounded-[30px] border border-white/5 flex flex-wrap justify-between items-center gap-4">
                                                             <div>
-                                                                <p className="font-black text-slate-800 text-lg">{w.marketerName}</p>
-                                                                <p className="text-xs font-bold text-slate-500 mt-1">{w.amount} ج.م | {w.method}: {w.number}</p>
+                                                                <p className="font-black text-lg">{w.marketerName}</p>
+                                                                <p className="text-xs font-bold opacity-60 mt-1">{w.amount} ج.م | {w.method}: {w.number}</p>
                                                             </div>
-                                                            <button onClick={() => confirmWithdrawal(w.id)} className="bg-emerald-500 text-white px-6 py-3 rounded-2xl font-black text-sm hover:bg-emerald-600 shadow-lg shadow-emerald-100">تأكيد الدفع</button>
+                                                            <div className="flex gap-2">
+                                                                <button onClick={() => window.open(`https://wa.me/2${w.number}`, '_blank')} className="bg-emerald-500 p-4 rounded-2xl"><i className="fab fa-whatsapp"></i></button>
+                                                                <button onClick={() => confirmWithdrawal(w.id)} className="bg-white text-slate-900 px-6 py-4 rounded-2xl font-black text-sm">تأكيد الدفع</button>
+                                                            </div>
                                                         </div>
                                                     ))}
                                                 </div>
                                             </div>
                                         )}
 
-                                        {/* Marketers Directory */}
-                                        <div className="bg-white rounded-[40px] shadow-sm border border-slate-100 overflow-hidden">
-                                            <div className="p-8 border-b bg-slate-50/50"><h2 className="font-black text-xl">إدارة المسوقين النشطين</h2></div>
+                                        {/* Directory Section: Marketers */}
+                                        <div className="bg-white rounded-[45px] shadow-sm border border-slate-100 overflow-hidden">
+                                            <div className="p-8 border-b bg-slate-50/30 flex justify-between items-center">
+                                                <h2 className="font-black text-xl flex items-center gap-3 text-slate-800"><i className="fas fa-address-book text-emerald-500"></i> دليل المسوقين</h2>
+                                            </div>
                                             <div className="divide-y divide-slate-50">
-                                                {marketers.map(m => (
-                                                    <div key={m.id} className="p-8 hover:bg-slate-50 transition-all group">
+                                                {marketersList.map(m => (
+                                                    <div key={m.id} className="p-8 hover:bg-slate-50/50 transition-all group">
                                                         <div className="flex flex-wrap justify-between items-center gap-6">
-                                                            <div className="flex items-center gap-4">
-                                                                <div className="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center font-black text-slate-400 group-hover:bg-emerald-500 group-hover:text-white transition-all uppercase">{m.name.charAt(0)}</div>
-                                                                <div>
+                                                            <div className="flex items-center gap-5">
+                                                                <div className="w-14 h-14 bg-slate-900 text-emerald-500 rounded-2xl flex items-center justify-center font-black text-xl shadow-lg shadow-slate-900/10 uppercase tracking-widest">{m.name.charAt(0)}</div>
+                                                                <div className="text-right">
                                                                     <h4 className="font-black text-lg text-slate-800">{m.name}</h4>
-                                                                    <p className="text-xs font-bold text-slate-400">{m.phone} | {m.email}</p>
+                                                                    <div className="flex items-center gap-3 mt-1 text-slate-400 font-bold text-xs">
+                                                                        <span>{m.phone}</span>
+                                                                        <button onClick={() => window.open(`https://wa.me/2${m.phone}`, '_blank')} className="text-emerald-500"><i className="fab fa-whatsapp text-lg"></i></button>
+                                                                    </div>
                                                                 </div>
                                                             </div>
-                                                            <div className="flex items-center gap-6">
-                                                                <button onClick={() => { setSelectedMarketer(m); setSelectedReferral(null); }} className="bg-slate-900 text-white px-6 py-2 rounded-full text-xs font-black hover:bg-emerald-500 transition-all">
-                                                                    {allUsers.filter(u => u.referredBy === m.uid).length} عملاء
+                                                            <div className="flex items-center gap-5">
+                                                                <div className="text-center px-4">
+                                                                    <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest mb-1">العمولة الحالية</p>
+                                                                    <p className="font-black text-xl text-emerald-500">{m.commissionBalance || 0}ج</p>
+                                                                </div>
+                                                                <button onClick={() => { setSelectedMarketer(m); setSelectedReferral(null); }} className="bg-slate-900 text-white px-6 py-3 rounded-2xl text-xs font-black hover:bg-emerald-500 transition-all shadow-lg shadow-slate-900/10">
+                                                                    إدارة الإحالات
                                                                 </button>
-                                                                <p className="font-black text-xl text-slate-800">{m.commissionBalance || 0}ج</p>
                                                             </div>
                                                         </div>
                                                         {selectedMarketer?.uid === m.uid && (
-                                                            <div className="mt-8 bg-slate-100 p-8 rounded-[35px] border border-slate-200 animate-in fade-in zoom-in-95">
-                                                                <div className="flex justify-between items-center mb-6">
-                                                                    <h5 className="font-black text-slate-500">شجرة عملاء: {m.name}</h5>
+                                                            <div className="mt-8 bg-slate-100/50 p-8 rounded-[40px] border border-slate-200 animate-in fade-in zoom-in-95 duration-300">
+                                                                <div className="flex justify-between items-center mb-8">
+                                                                    <h5 className="font-black text-slate-500 italic">Network Tree: {m.name}</h5>
                                                                     <button onClick={() => setSelectedMarketer(null)} className="text-red-400 hover:rotate-90 transition-all"><i className="fas fa-times-circle text-2xl"></i></button>
                                                                 </div>
                                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                                     {allUsers.filter(u => u.referredBy === m.uid).map(ref => (
-                                                                        <div key={ref.id} className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex justify-between items-center">
+                                                                        <div key={ref.id} className="bg-white p-6 rounded-[30px] border border-slate-200 shadow-sm flex justify-between items-center">
                                                                             <div className="text-right">
                                                                                 <p className="font-black text-slate-800">{ref.name}</p>
-                                                                                <p className="text-xs text-slate-400 font-bold">{ref.phone}</p>
+                                                                                <p className="text-xs text-slate-400 font-bold mt-1 tracking-tighter">{ref.phone}</p>
                                                                             </div>
-                                                                            <button onClick={() => { setSelectedReferral(ref); setShowServiceModal(true); }} className="w-10 h-10 bg-emerald-500 text-white rounded-xl shadow-lg hover:rotate-90 transition-all"><i className="fas fa-plus"></i></button>
+                                                                            <button onClick={() => { setSelectedReferral(ref); setShowServiceModal(true); }} className="w-12 h-12 bg-emerald-500 text-white rounded-2xl shadow-lg shadow-emerald-500/20 hover:scale-110 active:scale-95 transition-all"><i className="fas fa-plus"></i></button>
                                                                         </div>
                                                                     ))}
                                                                 </div>
@@ -374,61 +385,81 @@
                                         </div>
                                     </div>
 
-                                    {/* 3. Recent Activity (Right Column) */}
+                                    {/* Column 3: Stats & Log */}
                                     <div className="space-y-8">
-                                        <div className="bg-slate-900 text-white rounded-[40px] p-8 shadow-xl">
-                                            <h3 className="font-black text-lg mb-6 border-b border-white/10 pb-4">آخر العمليات الناجحة</h3>
-                                            <div className="space-y-6">
-                                                {services.slice(0, 8).map(s => (
-                                                    <div key={s.id} className="flex gap-4 items-start">
-                                                        <div className={`w-2 h-2 rounded-full mt-2 shrink-0 ${s.status === 'تم التنفيذ' ? 'bg-emerald-500 shadow-[0_0_10px_#2ecc71]' : 'bg-amber-500'}`}></div>
-                                                        <div>
-                                                            <p className="text-xs font-black">{s.userName}</p>
-                                                            <p className="text-[10px] opacity-50 font-bold">{s.name} - {s.price}ج</p>
-                                                            <p className="text-[8px] opacity-30 mt-1 uppercase font-black">{new Date(s.timestamp?.seconds * 1000).toLocaleString('ar-EG')}</p>
-                                                        </div>
+                                        {/* Quick Actions Card */}
+                                        <div className="bg-emerald-600 text-white p-8 rounded-[45px] shadow-2xl shadow-emerald-600/20">
+                                            <h3 className="font-black mb-4">اختصارات النظام</h3>
+                                            <div className="space-y-3">
+                                                <button className="w-full p-4 bg-white/10 rounded-2xl text-right text-sm font-black hover:bg-white/20 transition-all" onClick={() => window.open('https://console.firebase.google.com/', '_blank')}><i className="fas fa-database ml-2"></i> الدخول لقاعدة البيانات</button>
+                                                <button className="w-full p-4 bg-white/10 rounded-2xl text-right text-sm font-black hover:bg-white/20 transition-all" onClick={() => window.open('https://wa.me/201100665674', '_blank')}><i className="fas fa-headset ml-2"></i> الدعم التقني للمدير</button>
+                                            </div>
+                                        </div>
+
+                                        {/* Activity Log */}
+                                        <div className="bg-slate-900 text-white rounded-[45px] p-8 shadow-xl min-h-[500px]">
+                                            <h3 className="font-black text-lg mb-8 flex items-center justify-between">
+                                                <span>سجل العمليات</span>
+                                                <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-full uppercase tracking-widest">Live Log</span>
+                                            </h3>
+                                            <div className="space-y-8">
+                                                {services.slice(0, 10).map(s => (
+                                                    <div key={s.id} className="relative pr-6 border-r-2 border-white/5">
+                                                        <div className={`absolute -right-[7px] top-1 w-3 h-3 rounded-full ${s.status === 'تم التنفيذ' ? 'bg-emerald-500' : 'bg-amber-500'}`}></div>
+                                                        <p className="text-xs font-black text-white">{s.userName}</p>
+                                                        <p className="text-[10px] text-slate-400 font-bold mt-1 uppercase tracking-tighter">{s.name} | {s.price}ج</p>
+                                                        <p className="text-[8px] text-slate-600 mt-2 font-black italic">{new Date(s.timestamp?.seconds * 1000).toLocaleString('ar-EG')}</p>
                                                     </div>
                                                 ))}
-                                                {services.length === 0 && <p className="text-center opacity-30 py-10">لا توجد عمليات مسجلة</p>}
+                                                {services.length === 0 && <p className="text-center opacity-20 py-20 font-black italic">No operations recorded</p>}
                                             </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         ) : (
-                            /* --- MARKETER VIEW --- */
+                            /* --- MARKETER DASHBOARD --- */
                             <div className="space-y-8">
-                                <div className="bg-white rounded-[40px] shadow-sm border border-slate-100 overflow-hidden">
-                                    <div className="p-8 border-b bg-slate-50/50 flex justify-between items-center">
-                                        <h2 className="font-black text-2xl">عملائي المسجلين برابطي</h2>
-                                        <button className="bg-emerald-500 text-white px-6 py-2 rounded-full text-xs font-black" onClick={() => {
+                                <div className="stat-card bg-emerald-600 text-white p-12 rounded-[50px] shadow-2xl relative overflow-hidden">
+                                    <div className="absolute right-0 top-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2"></div>
+                                    <p className="text-xs font-black uppercase tracking-widest opacity-60 mb-4">Commission Balance</p>
+                                    <h2 className="text-6xl font-black mb-8 italic">{(dbUser.commissionBalance || 0).toFixed(0)} <span className="text-xl opacity-40 font-normal">EGP</span></h2>
+                                    { (dbUser.commissionBalance || 0) >= 100 && (
+                                        <button onClick={() => setShowWithdrawModal(true)} className="bg-white text-emerald-600 px-10 py-5 rounded-[25px] font-black text-lg shadow-xl hover:scale-105 active:scale-95 transition-all">سحب الأرباح الآن 💸</button>
+                                    )}
+                                </div>
+
+                                <div className="bg-white rounded-[45px] shadow-sm border border-slate-100 overflow-hidden">
+                                    <div className="p-10 border-b bg-slate-50/50 flex flex-wrap justify-between items-center gap-6">
+                                        <h2 className="font-black text-2xl text-slate-800">قائمة عملائي ({myReferralsList.length})</h2>
+                                        <button className="bg-slate-900 text-white px-8 py-4 rounded-3xl font-black text-sm" onClick={() => {
                                             const link = `${window.location.origin}/?ref=${dbUser.uid}`;
                                             navigator.clipboard.writeText(link);
-                                            alert("تم نسخ رابط الإحالة الخاص بك!");
+                                            alert("تم نسخ الرابط الحصري الخاص بك!");
                                         }}>نسخ رابط الإحالة</button>
                                     </div>
                                     <div className="divide-y divide-slate-50">
-                                        {myReferrals.length === 0 ? (
+                                        {myReferralsList.length === 0 ? (
                                             <div className="p-32 text-center text-slate-300">
-                                                <i className="fas fa-users-slash text-6xl mb-6"></i>
-                                                <p className="font-black text-xl">لا يوجد عملاء بعد. ابدأ بنشر رابطك!</p>
+                                                <i className="fas fa-user-astronaut text-7xl mb-6 opacity-20"></i>
+                                                <p className="font-black text-xl italic tracking-tighter">ابدأ ببناء شبكتك الآن، قم بنشر الرابط!</p>
                                             </div>
-                                        ) : myReferrals.map(ref => (
-                                            <div key={ref.id} className="p-8 flex justify-between items-center hover:bg-slate-50 transition-all">
-                                                <div className="flex items-center gap-5">
-                                                    <div className="w-14 h-14 bg-emerald-50 text-emerald-500 rounded-2xl flex items-center justify-center font-black text-xl">{ref.name.charAt(0)}</div>
-                                                    <div className="text-right">
-                                                        <h4 className="font-black text-lg">{ref.name}</h4>
-                                                        <div className="flex items-center gap-2 text-xs text-slate-400 font-bold mt-1">
+                                        ) : myReferralsList.map(ref => (
+                                            <div key={ref.id} className="p-10 flex flex-wrap justify-between items-center hover:bg-slate-50/50 transition-all group">
+                                                <div className="flex items-center gap-6 text-right">
+                                                    <div className="w-16 h-16 bg-emerald-50 text-emerald-500 rounded-[25px] flex items-center justify-center font-black text-2xl shadow-inner uppercase tracking-widest">{ref.name.charAt(0)}</div>
+                                                    <div>
+                                                        <h4 className="font-black text-xl text-slate-800">{ref.name}</h4>
+                                                        <div className="flex items-center gap-3 mt-2 text-sm text-slate-400 font-bold">
                                                             <span>{ref.phone}</span>
-                                                            <button onClick={() => window.open(`https://wa.me/2${ref.phone}`, '_blank')} className="text-emerald-500"><i className="fab fa-whatsapp text-lg"></i></button>
+                                                            <button onClick={() => window.open(`https://wa.me/2${ref.phone}`, '_blank')} className="text-emerald-500 hover:scale-125 transition-all"><i className="fab fa-whatsapp text-xl"></i></button>
                                                         </div>
                                                     </div>
                                                 </div>
-                                                <div className="text-left space-y-1">
+                                                <div className="text-left space-y-2 mt-4 md:mt-0">
                                                     {services.filter(s => s.userId === ref.uid).map(s => (
-                                                        <span key={s.id} className={`text-[10px] px-3 py-1 rounded-full font-black block border ${s.status === 'تم التنفيذ' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-slate-50 text-slate-500 border-slate-100'}`}>
-                                                            {s.name}: {s.status}
+                                                        <span key={s.id} className={`text-[10px] px-5 py-2 rounded-full font-black block border ${s.status === 'تم التنفيذ' ? 'bg-emerald-50 text-emerald-600 border-emerald-100 shadow-sm' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>
+                                                            {s.name} ({s.price}ج) : {s.status}
                                                         </span>
                                                     ))}
                                                 </div>
@@ -442,19 +473,28 @@
 
                     {/* --- MODALS --- */}
                     {showServiceModal && (
-                        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-                            <div className="bg-white rounded-[45px] p-10 w-full max-w-md shadow-2xl animate-in zoom-in-95 duration-200">
-                                <h3 className="text-2xl font-black mb-2">تعميد خدمة برمجية</h3>
-                                <p className="text-slate-400 font-bold mb-8 italic">للعميل: {selectedReferral?.name}</p>
-                                <div className="space-y-4">
-                                    <input className="w-full p-5 bg-slate-100 rounded-2xl outline-none font-bold border-2 border-transparent focus:border-emerald-500 transition-all text-right" placeholder="اسم الخدمة (مثلاً: متجر ملكي)" value={serviceForm.name} onChange={e => setServiceForm({...serviceForm, name: e.target.value})}/>
-                                    <input className="w-full p-5 bg-slate-100 rounded-2xl outline-none font-bold border-2 border-transparent focus:border-emerald-500 transition-all text-right" type="number" placeholder="السعر الكلي (ج.م)" value={serviceForm.price} onChange={e => setServiceForm({...serviceForm, price: e.target.value})}/>
-                                    <select className="w-full p-5 bg-slate-100 rounded-2xl outline-none font-bold border-2 border-transparent focus:border-emerald-500 transition-all text-right" value={serviceForm.status} onChange={e => setServiceForm({...serviceForm, status: e.target.value})}>
-                                        <option>جارية</option><option>تم التنفيذ</option><option>تم الرفض</option>
-                                    </select>
-                                    <div className="grid grid-cols-2 gap-4 mt-8">
-                                        <button onClick={addService} className="bg-emerald-500 text-white py-5 rounded-2xl font-black shadow-lg shadow-emerald-100">حفظ العملية</button>
-                                        <button onClick={() => setShowServiceModal(false)} className="bg-slate-200 text-slate-600 py-5 rounded-2xl font-black">إغلاق</button>
+                        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-xl z-[100] flex items-center justify-center p-6">
+                            <div className="bg-white rounded-[50px] p-12 w-full max-w-lg shadow-2xl animate-in zoom-in-95 duration-300">
+                                <h3 className="text-3xl font-black mb-2 text-slate-900">تعميد خدمة</h3>
+                                <p className="text-slate-400 font-bold mb-10 text-sm tracking-widest italic uppercase">Client: {selectedReferral?.name}</p>
+                                <div className="space-y-5">
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">نوع الخدمة</label>
+                                        <input className="w-full p-5 bg-slate-100 rounded-[25px] outline-none font-bold border-2 border-transparent focus:border-emerald-500 transition-all text-right" placeholder="مثال: تطبيق عقارات" value={serviceForm.name} onChange={e => setServiceForm({...serviceForm, name: e.target.value})}/>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">التكلفة الإجمالية (ج.م)</label>
+                                        <input className="w-full p-5 bg-slate-100 rounded-[25px] outline-none font-bold border-2 border-transparent focus:border-emerald-500 transition-all text-right text-emerald-600 text-xl" type="number" placeholder="5000" value={serviceForm.price} onChange={e => setServiceForm({...serviceForm, price: e.target.value})}/>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">الحالة الراهنة</label>
+                                        <select className="w-full p-5 bg-slate-100 rounded-[25px] outline-none font-bold border-2 border-transparent focus:border-emerald-500 transition-all text-right appearance-none" value={serviceForm.status} onChange={e => setServiceForm({...serviceForm, status: e.target.value})}>
+                                            <option>جارية</option><option>تم التنفيذ</option><option>تم الرفض</option>
+                                        </select>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4 mt-10">
+                                        <button onClick={addService} className="bg-slate-900 text-white py-5 rounded-[25px] font-black text-lg shadow-xl shadow-slate-900/20 active:scale-95 transition-all tracking-tighter">حفظ العملية</button>
+                                        <button onClick={() => setShowServiceModal(false)} className="bg-slate-100 text-slate-400 py-5 rounded-[25px] font-black tracking-tighter">إلغاء</button>
                                     </div>
                                 </div>
                             </div>
@@ -462,18 +502,31 @@
                     )}
 
                     {showWithdrawModal && (
-                        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-                            <div className="bg-white rounded-[45px] p-10 w-full max-w-md shadow-2xl">
-                                <h3 className="text-2xl font-black mb-2">سحب العمولات 💰</h3>
-                                <p className="text-slate-400 font-bold mb-8 italic text-sm">رصيدك القابل للسحب حالياً: {dbUser.commissionBalance} ج.م</p>
-                                <div className="space-y-4">
-                                    <input className="w-full p-5 bg-slate-100 rounded-2xl outline-none font-bold text-center text-xl" type="number" placeholder="المبلغ" value={withdrawForm.amount} onChange={e => setWithdrawForm({...withdrawForm, amount: e.target.value})}/>
-                                    <input className="w-full p-5 bg-slate-100 rounded-2xl outline-none font-bold text-center" placeholder="رقم التحويل (01xxxxxxxxx)" value={withdrawForm.number} onChange={e => setWithdrawForm({...withdrawForm, number: e.target.value})}/>
-                                    <select className="w-full p-5 bg-slate-100 rounded-2xl outline-none font-bold text-center" value={withdrawForm.method} onChange={e => setWithdrawForm({...withdrawForm, method: e.target.value})}>
-                                        <option value="Vodafone Cash">فودافون كاش</option>
-                                        <option value="InstaPay">انستا باي</option>
-                                    </select>
-                                    <div className="grid grid-cols-2 gap-4 mt-8"><button onClick={submitWithdraw} className="bg-emerald-500 text-white py-5 rounded-2xl font-black shadow-lg">إرسال الطلب</button><button onClick={() => setShowWithdrawModal(false)} className="bg-slate-200 text-slate-600 py-5 rounded-2xl font-black">إلغاء</button></div>
+                        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-xl z-[100] flex items-center justify-center p-6">
+                            <div className="bg-white rounded-[50px] p-12 w-full max-w-lg shadow-2xl">
+                                <h3 className="text-3xl font-black mb-2 text-slate-900 flex items-center gap-3"><i className="fas fa-hand-holding-usd text-emerald-500"></i> سحب العمولات</h3>
+                                <p className="text-slate-400 font-bold mb-10 text-sm italic tracking-widest pr-2 border-r-4 border-emerald-500">رصيد متاح: {dbUser.commissionBalance} ج.م</p>
+                                <div className="space-y-5 text-right">
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">المبلغ المطلوب</label>
+                                        <input className="w-full p-5 bg-slate-50 rounded-[25px] outline-none font-black text-center text-3xl text-emerald-600 border-2 border-slate-100 focus:border-emerald-500 transition-all" type="number" placeholder="100" value={withdrawForm.amount} onChange={e => setWithdrawForm({...withdrawForm, amount: e.target.value})}/>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">رقم الاستقبال (محفظة/حساب)</label>
+                                        <input className="w-full p-5 bg-slate-50 rounded-[25px] outline-none font-bold text-center text-xl border-2 border-slate-100 focus:border-emerald-500 transition-all tracking-widest" placeholder="01xxxxxxxxx" value={withdrawForm.number} onChange={e => setWithdrawForm({...withdrawForm, number: e.target.value})}/>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">بوابة الدفع المفضلة</label>
+                                        <select className="w-full p-5 bg-slate-50 rounded-[25px] outline-none font-bold text-center border-2 border-slate-100 focus:border-emerald-500 transition-all appearance-none" value={withdrawForm.method} onChange={e => setWithdrawForm({...withdrawForm, method: e.target.value})}>
+                                            <option value="Vodafone Cash">فودافون كاش</option>
+                                            <option value="InstaPay">انستا باي</option>
+                                            <option value="Binance Pay">Binance USDT</option>
+                                        </select>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4 mt-10">
+                                        <button onClick={submitWithdraw} className="bg-emerald-500 text-white py-5 rounded-[25px] font-black text-lg shadow-xl shadow-emerald-500/20 active:scale-95 transition-all">إرسال الطلب</button>
+                                        <button onClick={() => setShowWithdrawModal(false)} className="bg-slate-100 text-slate-400 py-5 rounded-[25px] font-black tracking-tighter">إغلاق</button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
