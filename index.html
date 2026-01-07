@@ -4,21 +4,40 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>مركز عمليات داتا بريدج | Data Bridge Ops</title>
+    
+    <!-- Fonts & Icons -->
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;900&display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
+    
+    <!-- Scripts: React, Babel, Tailwind, Lucide -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Firebase SDKs (Compatibility Mode) -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-    <style>body { font-family: 'Cairo', sans-serif; background-color: #f8fafc; }</style>
+
+    <style>
+        body { font-family: 'Cairo', sans-serif; background-color: #f8fafc; }
+        .animate-spin-custom { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #2ecc71; border-radius: 10px; }
+    </style>
 </head>
 <body>
     <div id="root"></div>
+
     <script type="text/babel">
         const { useState, useEffect } = React;
+
+        // --- Firebase Config ---
         const firebaseConfig = {
             apiKey: "AIzaSyCic2l0BP5h6sEiPxPkVO7A6RaIVr77BIA",
             authDomain: "data-bridge-dd630.firebaseapp.com",
@@ -41,6 +60,8 @@
             const [email, setEmail] = useState('');
             const [password, setPassword] = useState('');
             const [error, setError] = useState('');
+            
+            // Data States
             const [allUsers, setAllUsers] = useState([]);
             const [services, setServices] = useState([]);
             const [withdrawals, setWithdrawals] = useState([]);
@@ -48,6 +69,8 @@
             const [selectedReferral, setSelectedReferral] = useState(null);
             const [showServiceModal, setShowServiceModal] = useState(false);
             const [showWithdrawModal, setShowWithdrawModal] = useState(false);
+
+            // Forms
             const [serviceForm, setServiceForm] = useState({ name: '', price: '', status: 'جارية' });
             const [withdrawForm, setWithdrawForm] = useState({ amount: '', number: '', method: 'Vodafone Cash' });
 
@@ -67,12 +90,27 @@
             useEffect(() => {
                 if (step === 'dashboard' && dbUser) {
                     const baseRef = db.collection('artifacts').doc(appId).collection('public').doc('data');
-                    const unsubUsers = baseRef.collection('users').onSnapshot(snap => setAllUsers(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
-                    const unsubServices = baseRef.collection('services').onSnapshot(snap => setServices(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
-                    const unsubWithdraw = baseRef.collection('withdrawals').onSnapshot(snap => setWithdrawals(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
-                    return () => { unsubUsers(); unsubServices(); unsubWithdraw(); };
+                    
+                    const unsubUsers = baseRef.collection('users').onSnapshot(snap => {
+                        setAllUsers(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                    });
+
+                    const unsubServices = baseRef.collection('services').onSnapshot(snap => {
+                        setServices(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                    });
+
+                    const unsubWithdraw = baseRef.collection('withdrawals').onSnapshot(snap => {
+                        setWithdrawals(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                    });
+
+                    // مراقبة رصيد المستخدم الحالي لحظياً
+                    const unsubMe = baseRef.collection('users').doc(dbUser.uid).onSnapshot(doc => {
+                        if(doc.exists) setDbUser({ ...doc.data(), uid: doc.id });
+                    });
+
+                    return () => { unsubUsers(); unsubServices(); unsubWithdraw(); unsubMe(); };
                 }
-            }, [step, dbUser]);
+            }, [step]);
 
             const checkEmail = async () => {
                 if (!email) return;
@@ -81,14 +119,23 @@
                 try {
                     const snap = await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('users')
                         .where('email', '==', email.trim().toLowerCase()).get();
+                    
                     if (snap.empty) {
-                        setError('هذا الإيميل غير مسجل. تواصل مع الإدارة.');
+                        setError('هذا الإيميل غير مسجل كإدارة أو مسوق. تواصل مع 01100665674');
                     } else {
                         const doc = snap.docs[0];
-                        setDbUser({ ...doc.data(), uid: doc.id });
-                        setStep(doc.data().dashboardPassword ? 'auth-password' : 'setup-password');
+                        const data = doc.data();
+                        const role = data.role ? data.role.toLowerCase() : 'user';
+                        if (role !== 'admin' && role !== 'marketer') {
+                            setError('عذراً، هذا الحساب لا يملك صلاحية دخول اللوحة.');
+                        } else {
+                            setDbUser({ ...data, uid: doc.id });
+                            setStep(data.dashboardPassword ? 'auth-password' : 'setup-password');
+                        }
                     }
-                } catch (e) { setError('خطأ في جلب البيانات: ' + e.message); }
+                } catch (e) {
+                    setError('خطأ في الوصول لقاعدة البيانات. تأكد من إعداد القواعد (Rules).');
+                }
                 setLoading(false);
             };
 
@@ -100,59 +147,90 @@
             const handleSetupPassword = async () => {
                 if (password.length < 6) { setError('6 أحرف على الأقل.'); return; }
                 setLoading(true);
-                setError('');
                 try {
-                    // محاولة التحديث المباشر
-                    await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('users').doc(dbUser.uid).update({ 
-                        dashboardPassword: password 
-                    });
-                    setDbUser(prev => ({ ...prev, dashboardPassword: password }));
+                    await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('users').doc(dbUser.uid).update({ dashboardPassword: password });
                     setStep('dashboard');
-                } catch (e) { 
-                    console.error("Critical Save Error:", e);
-                    setError("فشل الحفظ: " + e.message + " (تأكد من تحديث القواعد وإضافة الدومين في Firebase)"); 
-                }
+                } catch (e) { setError("فشل حفظ الباسورد."); }
                 setLoading(false);
             };
 
+            const openWhatsApp = (phone) => {
+                if (!phone) return;
+                const cleanPhone = phone.replace(/\D/g, '');
+                const finalPhone = cleanPhone.startsWith('2') ? cleanPhone : '2' + cleanPhone;
+                window.open(`https://wa.me/${finalPhone}`, '_blank');
+            };
+
             const addService = async () => {
-                const serviceData = { ...serviceForm, userId: selectedReferral.uid, userName: selectedReferral.name, marketerId: selectedMarketer.uid, price: parseFloat(serviceForm.price), timestamp: firebase.firestore.FieldValue.serverTimestamp() };
+                const serviceData = { 
+                    ...serviceForm, 
+                    userId: selectedReferral.uid, 
+                    userName: selectedReferral.name, 
+                    marketerId: selectedMarketer.uid, 
+                    price: parseFloat(serviceForm.price), 
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp() 
+                };
                 await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('services').add(serviceData);
+                
                 if (serviceForm.status === 'تم التنفيذ') {
+                    const commission = parseFloat(serviceForm.price) * 0.1;
                     await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('users').doc(selectedMarketer.uid).update({ 
-                        commissionBalance: firebase.firestore.FieldValue.increment(parseFloat(serviceForm.price) * 0.1) 
+                        commissionBalance: firebase.firestore.FieldValue.increment(commission) 
                     });
                 }
                 setShowServiceModal(false);
                 setServiceForm({ name: '', price: '', status: 'جارية' });
             };
 
-            if (loading) return <div className="min-h-screen flex items-center justify-center bg-white"><div className="animate-spin rounded-full h-12 w-12 border-t-4 border-emerald-500"></div></div>;
+            const submitWithdraw = async () => {
+                if (parseFloat(withdrawForm.amount) > (dbUser.commissionBalance || 0)) {
+                    alert("الرصيد غير كافٍ!");
+                    return;
+                }
+                const req = {
+                    ...withdrawForm,
+                    marketerId: dbUser.uid,
+                    marketerName: dbUser.name,
+                    status: 'معلق',
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                };
+                await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('withdrawals').add(req);
+                alert("تم إرسال طلب السحب للإدارة بنجاح!");
+                setShowWithdrawModal(false);
+                setWithdrawForm({ amount: '', number: '', method: 'Vodafone Cash' });
+            };
+
+            if (loading) return (
+                <div className="min-h-screen flex items-center justify-center bg-white"><div className="animate-spin-custom rounded-full h-12 w-12 border-t-4 border-emerald-500"></div></div>
+            );
 
             if (step !== 'dashboard') return (
-                <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 text-center">
-                    <div className="bg-white p-10 rounded-[40px] shadow-2xl w-full max-w-md border border-slate-100">
+                <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
+                    <div className="bg-white p-10 rounded-[40px] shadow-2xl w-full max-w-md border border-slate-100 text-center">
                         <div className="w-20 h-20 bg-emerald-50 text-emerald-500 rounded-3xl flex items-center justify-center mx-auto mb-6"><i className="fas fa-shield-alt text-3xl"></i></div>
                         <h1 className="text-2xl font-black text-slate-800">بوابة داتا بريدج</h1>
-                        {error && <div className="bg-red-50 text-red-600 p-4 rounded-2xl text-xs mb-6 font-bold leading-relaxed">{error}</div>}
+                        {error && <div className="bg-red-50 text-red-600 p-4 rounded-2xl text-sm mb-6 font-bold leading-relaxed">{error}</div>}
+                        
                         {step === 'auth-email' && (
                             <div className="space-y-4">
                                 <input type="email" className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-emerald-500 outline-none text-center font-bold" placeholder="البريد الإلكتروني" value={email} onChange={(e) => setEmail(e.target.value)}/>
                                 <button onClick={checkEmail} className="w-full py-4 bg-emerald-500 text-white rounded-2xl font-black text-lg">دخول</button>
                             </div>
                         )}
+
                         {step === 'auth-password' && (
                             <div className="space-y-4">
-                                <p className="text-sm font-bold">أهلاً {dbUser.name}، أدخل كلمة السر</p>
-                                <input type="password" className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-emerald-500 outline-none text-center text-2xl font-bold" value={password} onChange={(e) => setPassword(e.target.value)}/>
-                                <button onClick={handlePasswordLogin} className="w-full py-4 bg-emerald-500 text-white rounded-2xl font-black text-lg">دخول</button>
+                                <p className="text-sm font-bold text-slate-600">أهلاً {dbUser.name}، أدخل كلمة السر</p>
+                                <input type="password" className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-emerald-500 outline-none text-center text-2xl font-bold tracking-widest" value={password} onChange={(e) => setPassword(e.target.value)}/>
+                                <button onClick={handlePasswordLogin} className="w-full py-4 bg-emerald-500 text-white rounded-2xl font-black text-lg shadow-lg">دخول اللوحة</button>
                             </div>
                         )}
+
                         {step === 'setup-password' && (
                             <div className="space-y-4">
-                                <p className="text-sm font-bold text-emerald-600">إنشاء كلمة سر للوحة التحكم</p>
+                                <p className="text-sm font-bold text-emerald-600">أنشئ كلمة سر للوحة التحكم</p>
                                 <input type="password" className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent focus:border-emerald-500 outline-none text-center font-bold" placeholder="كلمة السر الجديدة" value={password} onChange={(e) => setPassword(e.target.value)}/>
-                                <button onClick={handleSetupPassword} className="w-full py-4 bg-emerald-500 text-white rounded-2xl font-black text-lg shadow-lg">تفعيل اللوحة</button>
+                                <button onClick={handleSetupPassword} className="w-full py-4 bg-emerald-500 text-white rounded-2xl font-black text-lg shadow-lg">تفعيل</button>
                             </div>
                         )}
                     </div>
@@ -164,36 +242,66 @@
             const myReferrals = allUsers.filter(u => u.referredBy === dbUser.uid);
 
             return (
-                <div className="min-h-screen text-right pb-20" dir="rtl">
-                    <nav className="bg-slate-900 text-white p-5 sticky top-0 z-50 flex justify-between items-center">
-                        <span className="font-black text-lg">DATA BRIDGE OPS</span>
-                        <button onClick={() => window.location.reload()} className="text-red-400 p-3"><i className="fas fa-power-off"></i></button>
+                <div className="min-h-screen pb-20">
+                    <nav className="bg-slate-900 text-white p-5 sticky top-0 z-50 flex justify-between items-center shadow-lg">
+                        <div className="flex items-center gap-3"><span className="font-black text-lg">DATA BRIDGE HUB</span></div>
+                        <button onClick={() => window.location.reload()} className="text-red-400 p-3 hover:bg-white/10 rounded-full transition-all"><i className="fas fa-power-off"></i></button>
                     </nav>
+
                     <div className="max-w-7xl mx-auto p-4 md:p-10">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12 text-center">
-                            <div className="bg-white p-8 rounded-[35px] shadow-sm border border-slate-100"><p className="text-xs font-black text-slate-400 uppercase mb-4">{isAdmin ? 'المسوقين' : 'عملائي'}</p><h3 className="text-5xl font-black">{isAdmin ? marketers.length : myReferrals.length}</h3></div>
-                            <div className="bg-white p-8 rounded-[35px] shadow-sm border border-slate-100"><p className="text-xs font-black text-slate-400 uppercase mb-4">العمليات</p><h3 className="text-5xl font-black text-emerald-500">{isAdmin ? services.length : (dbUser.commissionBalance || 0).toFixed(0)} <span className="text-sm">ج.م</span></h3></div>
-                            <div className="bg-white p-8 rounded-[35px] shadow-sm border border-slate-100"><p className="text-xs font-black text-slate-400 uppercase mb-4">الرتبة</p><h3 className="text-2xl font-black text-slate-600 uppercase">{isAdmin ? 'ADMIN' : 'MARKETER'}</h3></div>
+                        {/* الإحصائيات العلوية */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+                            <div className="bg-white p-8 rounded-[35px] border border-slate-100 shadow-sm text-center">
+                                <p className="text-xs font-black text-slate-400 uppercase mb-4">{isAdmin ? 'المسوقين' : 'عملائي'}</p>
+                                <h3 className="text-5xl font-black text-slate-800">{isAdmin ? marketers.length : myReferrals.length}</h3>
+                            </div>
+                            <div className="bg-white p-8 rounded-[35px] border border-slate-100 shadow-sm text-center">
+                                <p className="text-xs font-black text-slate-400 uppercase mb-4">{isAdmin ? 'إجمالي العمليات' : 'أرباحي'}</p>
+                                <h3 className="text-5xl font-black text-emerald-500">{(dbUser.commissionBalance || 0).toFixed(0)} <span className="text-sm">ج.م</span></h3>
+                                {/* زر السحب يظهر للمسوق فقط لو رصيده عدا 100 */}
+                                {!isAdmin && (dbUser.commissionBalance || 0) >= 100 && (
+                                    <button onClick={() => setShowWithdrawModal(true)} className="mt-4 w-full py-2 bg-emerald-500 text-white rounded-xl font-bold shadow-lg animate-bounce">طلب سحب الأرباح 💸</button>
+                                )}
+                            </div>
+                            <div className="bg-white p-8 rounded-[35px] border border-slate-100 shadow-sm text-center">
+                                <p className="text-xs font-black text-slate-400 uppercase mb-4">الرتبة</p>
+                                <h3 className="text-2xl font-black text-slate-600 uppercase">{isAdmin ? 'ADMIN' : 'MARKETER'}</h3>
+                            </div>
                         </div>
 
                         {isAdmin ? (
+                            /* لوحة المدير */
                             <div className="bg-white rounded-[40px] shadow-sm border border-slate-100 overflow-hidden">
-                                <div className="p-8 border-b bg-slate-50/50"><h2 className="font-black text-2xl">إدارة المسوقين</h2></div>
+                                <div className="p-8 border-b bg-slate-50/50 flex justify-between items-center"><h2 className="font-black text-2xl">إدارة المسوقين والعملاء</h2></div>
                                 <div className="divide-y divide-slate-50">
                                     {marketers.map(m => (
-                                        <div key={m.id} className="p-8 hover:bg-slate-50">
-                                            <div className="flex flex-wrap justify-between items-center gap-6">
-                                                <div><h4 className="font-black text-xl">{m.name}</h4><p className="text-sm text-slate-400">{m.email}</p></div>
+                                        <div key={m.id} className="p-8 hover:bg-slate-50 transition-all">
+                                            <div className="flex flex-wrap justify-between items-center gap-6 text-right">
+                                                <div>
+                                                    <h4 className="font-black text-xl">{m.name}</h4>
+                                                    <div className="flex items-center gap-3 mt-1 text-slate-400">
+                                                        <span className="text-sm font-bold">{m.phone}</span>
+                                                        <button onClick={() => openWhatsApp(m.phone)} className="text-emerald-500 hover:scale-110 transition-all"><i className="fab fa-whatsapp text-xl"></i></button>
+                                                    </div>
+                                                </div>
                                                 <div className="flex gap-6 items-center">
-                                                    <button onClick={() => { setSelectedMarketer(m); setSelectedReferral(null); }} className="bg-slate-900 text-white px-5 py-2 rounded-full text-xs font-black hover:bg-emerald-500">{allUsers.filter(u => u.referredBy === m.uid).length} عملاء</button>
+                                                    <button onClick={() => { setSelectedMarketer(m); setSelectedReferral(null); }} className="bg-slate-900 text-white px-5 py-2 rounded-full text-xs font-black hover:bg-emerald-500">
+                                                        {allUsers.filter(u => u.referredBy === m.uid).length} عملاء
+                                                    </button>
                                                     <p className="font-black text-xl">{m.commissionBalance || 0}ج</p>
                                                 </div>
                                             </div>
                                             {selectedMarketer?.uid === m.uid && (
-                                                <div className="mt-8 bg-slate-100 p-8 rounded-[30px] grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div className="mt-8 bg-slate-100 p-8 rounded-[30px] grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in">
                                                     {allUsers.filter(u => u.referredBy === m.uid).map(ref => (
-                                                        <div key={ref.id} className="bg-white p-5 rounded-2xl flex justify-between items-center">
-                                                            <div><p className="font-black">{ref.name}</p><p className="text-xs text-slate-400">{ref.phone}</p></div>
+                                                        <div key={ref.id} className="bg-white p-5 rounded-2xl flex justify-between items-center shadow-sm">
+                                                            <div className="text-right">
+                                                                <p className="font-black">{ref.name}</p>
+                                                                <div className="flex items-center gap-2 text-xs text-slate-400 font-bold mt-1">
+                                                                    <span>{ref.phone}</span>
+                                                                    <button onClick={() => openWhatsApp(ref.phone)} className="text-emerald-500"><i className="fab fa-whatsapp"></i></button>
+                                                                </div>
+                                                            </div>
                                                             <button onClick={() => { setSelectedReferral(ref); setShowServiceModal(true); }} className="w-10 h-10 bg-emerald-500 text-white rounded-xl"><i className="fas fa-plus"></i></button>
                                                         </div>
                                                     ))}
@@ -204,14 +312,21 @@
                                 </div>
                             </div>
                         ) : (
+                            /* لوحة المسوق */
                             <div className="bg-white rounded-[40px] shadow-sm border border-slate-100 overflow-hidden p-8">
-                                <h2 className="font-black text-2xl mb-8">سجل عملائي</h2>
+                                <h2 className="font-black text-2xl mb-8">قائمة عملائي</h2>
                                 <div className="divide-y">
-                                    {myReferrals.length === 0 ? <p className="text-center py-10 opacity-50">لا يوجد عملاء بعد.</p> : myReferrals.map(ref => (
+                                    {myReferrals.length === 0 ? <p className="text-center py-20 opacity-50 font-bold">لا يوجد عملاء بعد.</p> : myReferrals.map(ref => (
                                         <div key={ref.id} className="py-6 flex justify-between items-center">
-                                            <div><p className="font-black">{ref.name}</p><p className="text-xs text-slate-400">{ref.phone}</p></div>
+                                            <div className="text-right">
+                                                <p className="font-black text-lg">{ref.name}</p>
+                                                <div className="flex items-center gap-3 text-sm text-slate-400 font-bold mt-1">
+                                                    <span>{ref.phone}</span>
+                                                    <button onClick={() => openWhatsApp(ref.phone)} className="text-emerald-500 hover:scale-110 transition-all"><i className="fab fa-whatsapp text-lg"></i></button>
+                                                </div>
+                                            </div>
                                             <div className="text-left space-y-1">
-                                                {services.filter(s => s.userId === ref.uid).map(s => <span key={s.id} className="text-[10px] px-3 py-1 rounded-full bg-emerald-100 text-emerald-600 font-bold block">{s.name}: {s.status}</span>)}
+                                                {services.filter(s => s.userId === ref.uid).map(s => <span key={s.id} className={`text-[10px] px-3 py-1 rounded-full font-black block ${s.status === 'تم التنفيذ' ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-500'}`}>{s.name}: {s.status}</span>)}
                                             </div>
                                         </div>
                                     ))}
@@ -220,17 +335,37 @@
                         )}
                     </div>
 
+                    {/* نافذة تسجيل خدمة */}
                     {showServiceModal && (
                         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-                            <div className="bg-white rounded-[40px] p-10 w-full max-w-md shadow-2xl">
-                                <h3 className="text-2xl font-black mb-8 text-right">تسجيل خدمة لـ {selectedReferral?.name}</h3>
+                            <div className="bg-white rounded-[40px] p-10 w-full max-w-md shadow-2xl text-right">
+                                <h3 className="text-2xl font-black mb-8 border-r-4 border-emerald-500 pr-4">تسجيل خدمة لـ {selectedReferral?.name}</h3>
                                 <div className="space-y-4">
-                                    <input className="w-full p-4 bg-slate-50 rounded-2xl outline-none font-bold text-right" placeholder="اسم الخدمة" value={serviceForm.name} onChange={e => setServiceForm({...serviceForm, name: e.target.value})}/>
-                                    <input className="w-full p-4 bg-slate-50 rounded-2xl outline-none font-bold text-right" type="number" placeholder="السعر" value={serviceForm.price} onChange={e => setServiceForm({...serviceForm, price: e.target.value})}/>
-                                    <select className="w-full p-4 bg-slate-50 rounded-2xl outline-none font-bold text-right" value={serviceForm.status} onChange={e => setServiceForm({...serviceForm, status: e.target.value})}>
+                                    <input className="w-full p-4 bg-slate-50 rounded-2xl outline-none font-bold border-2 border-transparent focus:border-emerald-500 transition-all" placeholder="اسم الخدمة" value={serviceForm.name} onChange={e => setServiceForm({...serviceForm, name: e.target.value})}/>
+                                    <input className="w-full p-4 bg-slate-50 rounded-2xl outline-none font-bold border-2 border-transparent focus:border-emerald-500 transition-all" type="number" placeholder="السعر" value={serviceForm.price} onChange={e => setServiceForm({...serviceForm, price: e.target.value})}/>
+                                    <select className="w-full p-4 bg-slate-50 rounded-2xl outline-none font-bold border-2 border-transparent focus:border-emerald-500 transition-all" value={serviceForm.status} onChange={e => setServiceForm({...serviceForm, status: e.target.value})}>
                                         <option>جارية</option><option>تم التنفيذ</option><option>تم الرفض</option>
                                     </select>
-                                    <div className="grid grid-cols-2 gap-4 mt-8"><button onClick={addService} className="bg-emerald-500 text-white py-4 rounded-2xl font-black">تأكيد</button><button onClick={() => setShowServiceModal(false)} className="bg-slate-100 text-slate-500 py-4 rounded-2xl font-black">إلغاء</button></div>
+                                    <div className="grid grid-cols-2 gap-4 mt-8"><button onClick={addService} className="bg-emerald-500 text-white py-4 rounded-2xl font-black shadow-lg">تأكيد</button><button onClick={() => setShowServiceModal(false)} className="bg-slate-100 text-slate-500 py-4 rounded-2xl font-black">إلغاء</button></div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* نافذة طلب السحب */}
+                    {showWithdrawModal && (
+                        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+                            <div className="bg-white rounded-[40px] p-10 w-full max-w-md shadow-2xl text-right">
+                                <h3 className="text-2xl font-black mb-2 border-r-4 border-emerald-500 pr-4">سحب العمولات 💰</h3>
+                                <p className="text-slate-400 font-bold mb-8 italic text-sm pr-4">رصيدك القابل للسحب: {dbUser.commissionBalance} ج.م</p>
+                                <div className="space-y-4">
+                                    <input className="w-full p-4 bg-slate-50 rounded-2xl outline-none font-bold" type="number" placeholder="المبلغ المطلوب" value={withdrawForm.amount} onChange={e => setWithdrawForm({...withdrawForm, amount: e.target.value})}/>
+                                    <input className="w-full p-4 bg-slate-50 rounded-2xl outline-none font-bold" placeholder="رقم فودافون كاش أو انستا باي" value={withdrawForm.number} onChange={e => setWithdrawForm({...withdrawForm, number: e.target.value})}/>
+                                    <select className="w-full p-4 bg-slate-50 rounded-2xl outline-none font-bold" value={withdrawForm.method} onChange={e => setWithdrawForm({...withdrawForm, method: e.target.value})}>
+                                        <option value="Vodafone Cash">فودافون كاش</option>
+                                        <option value="InstaPay">انستا باي</option>
+                                    </select>
+                                    <div className="grid grid-cols-2 gap-4 mt-8"><button onClick={submitWithdraw} className="bg-emerald-500 text-white py-4 rounded-2xl font-black shadow-lg">إرسال الطلب</button><button onClick={() => setShowWithdrawModal(false)} className="bg-slate-100 text-slate-500 py-4 rounded-2xl font-black">إلغاء</button></div>
                                 </div>
                             </div>
                         </div>
