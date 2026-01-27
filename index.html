@@ -3,32 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>مركز عمليات داتا بريدج | Data Bridge Ops Pro v4.1</title>
+    <title>لوحة التحكم | داتا بريدج برو</title>
     
-    <!-- Fonts & Icons -->
-    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
     
-    <!-- Scripts -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- Firebase SDKs -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 
     <style>
-        body { font-family: 'Cairo', sans-serif; background-color: #f8fafc; scroll-behavior: smooth; }
-        .glass-nav { background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(12px); }
-        .stat-card { transition: all 0.3s ease; border-radius: 40px; }
-        .stat-card:hover { transform: translateY(-5px); box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.1); }
-        .custom-scroll::-webkit-scrollbar { width: 4px; }
-        .custom-scroll::-webkit-scrollbar-thumb { background: #10b981; border-radius: 10px; }
-        @keyframes pulse-gold { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-        .pulse-pending { animation: pulse-gold 2s infinite; }
+        body { font-family: 'Cairo', sans-serif; background-color: #f1f5f9; color: #1e293b; }
+        .modern-card { background: white; border-radius: 24px; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
+        .stat-icon { background: linear-gradient(135deg, #10b981, #059669); color: white; }
+        .nav-link-active { border-bottom: 3px solid #10b981; color: #10b981; }
+        .glass-header { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(10px); border-bottom: 1px solid #e2e8f0; }
+        input, select { border: 1.5px solid #e2e8f0 !important; transition: all 0.2s; }
+        input:focus, select:focus { border-color: #10b981 !important; outline: none; ring: 2px ring-emerald-100; }
+        .custom-scroll::-webkit-scrollbar { width: 5px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
     </style>
 </head>
 <body>
@@ -37,7 +35,6 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo } = React;
 
-        // --- Firebase Config ---
         const firebaseConfig = {
             apiKey: "AIzaSyCic2l0BP5h6sEiPxPkVO7A6RaIVr77BIA",
             authDomain: "data-bridge-dd630.firebaseapp.com",
@@ -59,31 +56,25 @@
             const [email, setEmail] = useState('');
             const [password, setPassword] = useState('');
             const [error, setError] = useState('');
-            
             const [allUsers, setAllUsers] = useState([]);
             const [services, setServices] = useState([]);
             const [withdrawals, setWithdrawals] = useState([]);
-            
             const [showServiceModal, setShowServiceModal] = useState(false);
-            const [showWithdrawModal, setShowWithdrawModal] = useState(false);
             const [selectedTargetUser, setSelectedTargetUser] = useState(null);
-            const [editingServiceId, setEditingServiceId] = useState(null);
-
             const [serviceForm, setServiceForm] = useState({ name: '', price: '', status: 'جارية' });
-            const [withdrawForm, setWithdrawForm] = useState({ amount: '', number: '', method: 'Vodafone Cash' });
 
             useEffect(() => {
                 const init = async () => {
                     try {
                         await auth.signInAnonymously();
-                        const saved = localStorage.getItem('db_ops_session_v4_1');
+                        const saved = localStorage.getItem('db_ops_session_v5');
                         if (saved) {
                             const parsed = JSON.parse(saved);
                             setDbUser(parsed);
                             setStep('dashboard');
                         }
                         setLoading(false);
-                    } catch (e) { setError("خطأ في الاتصال."); setLoading(false); }
+                    } catch (e) { setError("فشل الاتصال بالسيرفر"); setLoading(false); }
                 };
                 init();
             }, []);
@@ -94,15 +85,7 @@
                     const unsubUsers = baseRef.collection('users').onSnapshot(snap => setAllUsers(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
                     const unsubServices = baseRef.collection('services').onSnapshot(snap => setServices(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
                     const unsubWithdraw = baseRef.collection('withdrawals').onSnapshot(snap => setWithdrawals(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
-                    
-                    const unsubMe = baseRef.collection('users').doc(dbUser.uid || dbUser.id).onSnapshot(doc => {
-                        if(doc.exists) {
-                            const data = { ...doc.data(), uid: doc.id };
-                            setDbUser(data);
-                            localStorage.setItem('db_ops_session_v4_1', JSON.stringify(data));
-                        }
-                    });
-                    return () => { unsubUsers(); unsubServices(); unsubWithdraw(); unsubMe(); };
+                    return () => { unsubUsers(); unsubServices(); unsubWithdraw(); };
                 }
             }, [step]);
 
@@ -111,323 +94,141 @@
                 try {
                     const snap = await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('users').where('email', '==', email.trim().toLowerCase()).get();
                     if (snap.empty) {
-                        setError('هذا البريد غير مسجل في النظام.');
+                        setError('الإيميل غير مسجل');
                     } else {
                         const doc = snap.docs[0];
-                        const data = doc.data();
-                        setDbUser({ ...data, uid: doc.id });
-                        // التحقق مما إذا كان لديه كلمة سر مسبقة أم لا
-                        if (data.dashboardPassword && data.dashboardPassword !== "") {
-                            setStep('auth-password');
-                        } else {
-                            setStep('setup-password');
-                        }
+                        setDbUser({ ...doc.data(), uid: doc.id });
+                        setStep(doc.data().dashboardPassword ? 'auth-password' : 'setup-password');
                     }
-                } catch (e) { setError('فشل جلب البيانات.'); }
+                } catch (e) { setError('حدث خطأ'); }
                 setLoading(false);
             };
 
-            const handlePasswordLogin = () => {
-                if (password === dbUser.dashboardPassword) {
-                    localStorage.setItem('db_ops_session_v4_1', JSON.stringify(dbUser));
-                    setStep('dashboard');
-                } else setError('كلمة المرور غير صحيحة.');
-            };
-
-            const handleSetupPassword = async () => {
-                if (password.length < 4) return setError('كلمة السر قصيرة جداً.');
-                await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('users').doc(dbUser.uid || dbUser.id).update({ dashboardPassword: password });
-                const updatedUser = { ...dbUser, dashboardPassword: password };
-                setDbUser(updatedUser);
-                localStorage.setItem('db_ops_session_v4_1', JSON.stringify(updatedUser));
-                setStep('dashboard');
-            };
-
             const handleLogout = () => {
-                if(confirm("خروج من النظام؟")) {
-                    localStorage.removeItem('db_ops_session_v4_1');
-                    window.location.reload();
-                }
+                localStorage.removeItem('db_ops_session_v5');
+                window.location.reload();
             };
 
-            const handleServiceSubmit = async () => {
-                if(!serviceForm.name || !serviceForm.price) return alert("أكمل البيانات");
-                
-                const baseRef = db.collection('artifacts').doc(appId).collection('public').doc('data');
-                const finalPrice = parseFloat(serviceForm.price);
-                
-                try {
-                    if (editingServiceId) {
-                        await baseRef.collection('services').doc(editingServiceId).update({ ...serviceForm, price: finalPrice });
-                    } else {
-                        // البحث عن المسوق الذي دعا هذا العميل
-                        const marketerId = selectedTargetUser.referredBy;
-                        const marketerObj = allUsers.find(u => u.id === marketerId || u.uid === marketerId);
+            const stats = useMemo(() => ({
+                sales: services.filter(s => s.status === 'تم التنفيذ').reduce((acc, curr) => acc + (curr.price || 0), 0),
+                users: allUsers.length,
+                pendingWithdraw: withdrawals.filter(w => w.status === 'معلق').length
+            }), [services, allUsers, withdrawals]);
 
-                        const newService = {
-                            name: serviceForm.name,
-                            price: finalPrice,
-                            status: serviceForm.status,
-                            userId: selectedTargetUser.id || selectedTargetUser.uid,
-                            userName: selectedTargetUser.name,
-                            marketerId: marketerId || "admin", // إذا لم يوجد مسوق، تُنسب للآدمن
-                            marketerName: marketerObj ? marketerObj.name : "الإدارة",
-                            timestamp: firebase.firestore.FieldValue.serverTimestamp()
-                        };
-
-                        await baseRef.collection('services').add(newService);
-
-                        // إضافة عمولة للمسوق فوراً إذا كانت الحالة "تم التنفيذ"
-                        if (serviceForm.status === 'تم التنفيذ' && marketerId) {
-                            const commission = finalPrice * 0.1;
-                            await baseRef.collection('users').doc(marketerId).update({
-                                commissionBalance: firebase.firestore.FieldValue.increment(commission)
-                            });
-                        }
-                    }
-                    setShowServiceModal(false);
-                    setServiceForm({ name: '', price: '', status: 'جارية' });
-                    setEditingServiceId(null);
-                } catch (e) { alert("خطأ: " + e.message); }
-            };
-
-            const stats = useMemo(() => {
-                const finished = services.filter(s => s.status === 'تم التنفيذ');
-                return {
-                    sales: finished.reduce((acc, curr) => acc + (curr.price || 0), 0),
-                    users: allUsers.length,
-                    marketers: allUsers.filter(u => u.role?.toLowerCase() === 'marketer').length,
-                    pending: withdrawals.filter(w => w.status === 'معلق').length
-                };
-            }, [services, allUsers, withdrawals]);
-
-            const isAdmin = dbUser?.role?.toLowerCase() === 'admin';
-
-            if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-900 text-emerald-400 font-bold tracking-widest">INITIALIZING OPS...</div>;
+            if (loading) return <div className="h-screen flex items-center justify-center bg-white text-emerald-600 font-bold">جاري تحميل داتا بريدج...</div>;
 
             if (step !== 'dashboard') return (
-                <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
-                    <div className="bg-white p-10 rounded-[50px] shadow-2xl w-full max-w-md text-center">
-                        <div className="w-20 h-20 bg-emerald-50 text-emerald-600 rounded-3xl flex items-center justify-center mx-auto mb-6"><i className="fas fa-lock text-3xl"></i></div>
-                        <h1 className="text-2xl font-black text-slate-900 mb-2">Data Bridge Ops</h1>
-                        <p className="text-xs font-bold text-slate-400 mb-8 uppercase tracking-widest">Secure Operator Login</p>
-                        {error && <div className="bg-red-50 text-red-600 p-4 rounded-2xl mb-6 text-xs font-bold">{error}</div>}
-                        
-                        {step === 'auth-email' && (
-                            <div className="space-y-4">
-                                <input type="email" className="w-full p-5 rounded-3xl bg-slate-50 border-2 border-transparent focus:border-emerald-500 outline-none text-center font-bold transition-all" placeholder="البريد الإلكتروني" value={email} onChange={e => setEmail(e.target.value)} />
-                                <button onClick={checkEmail} className="w-full py-5 bg-slate-900 text-white rounded-3xl font-black shadow-lg">تحقق</button>
-                            </div>
-                        )}
-
-                        {(step === 'auth-password' || step === 'setup-password') && (
-                            <div className="space-y-4">
-                                <p className="text-xs font-bold text-slate-500 mb-2">{step === 'setup-password' ? 'أهلاً بك لأول مرة، اختر رمزاً سرياً' : 'أدخل الرمز السري للمتابعة'}</p>
-                                <input type="password" title="password" className="w-full p-5 rounded-3xl bg-slate-50 border-2 border-transparent focus:border-emerald-500 outline-none text-center text-2xl font-black tracking-widest" value={password} onChange={e => setPassword(e.target.value)} />
-                                <button onClick={step === 'setup-password' ? handleSetupPassword : handlePasswordLogin} className="w-full py-5 bg-emerald-500 text-white rounded-3xl font-black shadow-lg">دخول</button>
-                            </div>
-                        )}
+                <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+                    <div className="bg-white p-12 rounded-[40px] shadow-xl w-full max-w-md text-center border border-slate-200">
+                        <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-6"><i className="fas fa-shield-halved text-2xl"></i></div>
+                        <h1 className="text-2xl font-black mb-6">دخول العمليات</h1>
+                        {error && <div className="bg-red-50 text-red-500 p-3 rounded-xl mb-4 text-sm font-bold">{error}</div>}
+                        <input type="email" className="w-full p-4 rounded-2xl bg-slate-50 mb-4 text-center" placeholder="البريد الإلكتروني" onChange={e => setEmail(e.target.value)} />
+                        {step !== 'auth-email' && <input type="password" title="pass" className="w-full p-4 rounded-2xl bg-slate-50 mb-4 text-center" placeholder="كلمة السر" onChange={e => setPassword(e.target.value)} />}
+                        <button onClick={step === 'auth-email' ? checkEmail : () => setStep('dashboard')} className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold shadow-lg shadow-emerald-200">متابعة</button>
                     </div>
                 </div>
             );
 
             return (
-                <div className="min-h-screen pb-20">
-                    <nav className="glass-nav text-white p-5 sticky top-0 z-50">
-                        <div className="max-w-7xl mx-auto flex justify-between items-center">
-                            <div className="flex items-center gap-4">
-                                <div className="bg-emerald-500 p-2 rounded-xl"><i className="fas fa-bolt"></i></div>
-                                <span className="font-black text-xl italic tracking-tighter uppercase">DB <span className="text-emerald-400">COMMAND</span></span>
-                            </div>
-                            <div className="flex items-center gap-3">
-                                <span className="hidden md:block text-[10px] font-bold opacity-50 uppercase">{dbUser.name} ({dbUser.role})</span>
-                                <button onClick={handleLogout} className="bg-red-500/10 text-red-500 w-10 h-10 rounded-xl"><i className="fas fa-power-off"></i></button>
-                            </div>
+                <div className="min-h-screen">
+                    <header className="glass-header sticky top-0 z-40 px-6 py-4 flex justify-between items-center">
+                        <div className="flex items-center gap-3">
+                            <div className="bg-emerald-600 p-2 rounded-lg text-white"><i className="fas fa-cubes"></i></div>
+                            <h2 className="font-black text-xl tracking-tight text-slate-800">DATA BRIDGE <span className="text-emerald-600">OPS</span></h2>
                         </div>
-                    </nav>
+                        <div className="flex items-center gap-4">
+                            <span className="text-sm font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full">{dbUser.name}</span>
+                            <button onClick={handleLogout} className="text-red-500 hover:bg-red-50 w-10 h-10 rounded-full transition-colors"><i className="fas fa-power-off"></i></button>
+                        </div>
+                    </header>
 
-                    <div className="max-w-7xl mx-auto p-4 md:p-8">
-                        {/* Stats */}
-                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+                    <main className="max-w-7xl mx-auto p-6 lg:p-10">
+                        {/* Stats Summary */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
                             {[
-                                { l: 'المبيعات', v: stats.sales + ' ج', i: 'fa-coins', c: 'text-emerald-600' },
-                                { l: 'المستخدمين', v: stats.users, i: 'fa-users', c: 'text-blue-600' },
-                                { l: 'المسوقين', v: stats.marketers, i: 'fa-user-tie', c: 'text-slate-800' },
-                                { l: 'سحوبات', v: stats.pending, i: 'fa-clock', c: stats.pending > 0 ? 'text-amber-500 pulse-pending' : 'text-slate-200' },
-                            ].map((s, idx) => (
-                                <div key={idx} className="stat-card bg-white p-6 border border-slate-100 shadow-sm relative overflow-hidden">
-                                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{s.l}</p>
-                                    <h3 className={`text-2xl font-black ${s.c}`}>{s.v}</h3>
-                                    <i className={`fas ${s.i} absolute -right-2 -bottom-2 text-5xl opacity-5`}></i>
+                                { title: 'إجمالي المبيعات', val: stats.sales + ' ج.م', icon: 'fa-sack-dollar', color: 'text-emerald-600' },
+                                { title: 'قاعدة العملاء', val: stats.users + ' مستخدم', icon: 'fa-users', color: 'text-blue-600' },
+                                { title: 'طلبات سحب معلقة', val: stats.pendingWithdraw, icon: 'fa-hand-holding-dollar', color: 'text-amber-500' }
+                            ].map((s, i) => (
+                                <div key={i} className="modern-card p-8 flex items-center justify-between">
+                                    <div>
+                                        <p className="text-sm font-bold text-slate-400 mb-1">{s.title}</p>
+                                        <h3 className={`text-2xl font-black ${s.color}`}>{s.val}</h3>
+                                    </div>
+                                    <div className="w-14 h-14 rounded-2xl bg-slate-50 flex items-center justify-center text-xl text-slate-400"><i className={`fas ${s.icon}`}></i></div>
                                 </div>
                             ))}
                         </div>
 
-                        {isAdmin ? (
-                            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                                {/* الدليل الرئيسي لكل المستخدمين */}
-                                <div className="lg:col-span-8">
-                                    <div className="bg-white rounded-[40px] shadow-sm border border-slate-100 overflow-hidden">
-                                        <div className="p-8 border-b bg-slate-50/50 flex justify-between items-center">
-                                            <h2 className="font-black text-xl uppercase tracking-tighter italic">Global User Directory</h2>
-                                            <span className="bg-slate-900 text-white text-[9px] px-3 py-1 rounded-full font-bold">MASTER LIST</span>
-                                        </div>
-                                        <div className="divide-y divide-slate-50 max-h-[700px] overflow-y-auto custom-scroll">
-                                            {allUsers.map(u => {
-                                                const isMarketer = u.role?.toLowerCase() === 'marketer';
-                                                const marketerRef = allUsers.find(m => m.id === u.referredBy || m.uid === u.referredBy);
-                                                return (
-                                                    <div key={u.id} className="p-6 hover:bg-slate-50/50 transition-all group flex flex-wrap justify-between items-center gap-4">
-                                                        <div className="flex items-center gap-4">
-                                                            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-white ${isMarketer ? 'bg-emerald-500 shadow-lg shadow-emerald-500/20' : 'bg-slate-200 text-slate-500'}`}>
-                                                                {u.name?.charAt(0)}
-                                                            </div>
-                                                            <div>
-                                                                <h4 className="font-black text-slate-800">{u.name}</h4>
-                                                                <p className="text-[10px] font-bold text-slate-400">{u.email} | {u.phone || 'بدون هاتف'}</p>
-                                                                <div className="flex gap-2 mt-1">
-                                                                    <span className={`text-[8px] font-black px-2 py-0.5 rounded uppercase ${isMarketer ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                                                                        {isMarketer ? 'Marketer' : 'Regular User'}
-                                                                    </span>
-                                                                    {u.dashboardPassword && (
-                                                                        <span className="text-[8px] font-black bg-amber-50 text-amber-600 px-2 py-0.5 rounded border border-amber-100 tracking-widest">
-                                                                            PW: {u.dashboardPassword}
-                                                                        </span>
-                                                                    )}
-                                                                    {marketerRef && (
-                                                                        <span className="text-[8px] font-black bg-blue-50 text-blue-600 px-2 py-0.5 rounded border border-blue-100">
-                                                                            بواسطة: {marketerRef.name}
-                                                                        </span>
-                                                                    )}
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                        <div className="flex items-center gap-2">
-                                                            {!isMarketer && (
-                                                                <button onClick={() => { setSelectedTargetUser(u); setEditingServiceId(null); setServiceForm({name:'', price:'', status:'جارية'}); setShowServiceModal(true); }} className="bg-slate-900 text-white px-4 py-2 rounded-xl text-[10px] font-black shadow-lg shadow-slate-900/10 active:scale-95 transition-all">
-                                                                    إضافة خدمة +
-                                                                </button>
-                                                            )}
-                                                            <button onClick={() => window.open(`https://wa.me/2${u.phone}`, '_blank')} className="text-emerald-500 w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center"><i className="fab fa-whatsapp text-lg"></i></button>
-                                                        </div>
+                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                            {/* User List */}
+                            <div className="lg:col-span-8">
+                                <div className="modern-card overflow-hidden">
+                                    <div className="p-6 border-b bg-slate-50/50 flex justify-between items-center">
+                                        <h3 className="font-black text-lg">إدارة المستخدمين</h3>
+                                        <div className="text-[10px] font-black bg-emerald-100 text-emerald-700 px-2 py-1 rounded">MASTER DIRECTORY</div>
+                                    </div>
+                                    <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto custom-scroll">
+                                        {allUsers.map(u => (
+                                            <div key={u.id} className="p-5 flex justify-between items-center hover:bg-slate-50 transition-colors">
+                                                <div className="flex items-center gap-4">
+                                                    <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center font-bold text-slate-500 uppercase">{u.name?.charAt(0)}</div>
+                                                    <div>
+                                                        <h4 className="font-bold text-slate-800">{u.name}</h4>
+                                                        <p className="text-xs text-slate-400">{u.email} | {u.phone || 'بدون رقم'}</p>
                                                     </div>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* سجل العمليات الجانبي */}
-                                <div className="lg:col-span-4">
-                                    <div className="bg-slate-900 rounded-[40px] p-8 text-white min-h-[500px] border border-white/5 shadow-2xl sticky top-28">
-                                        <h3 className="font-black text-lg mb-8 pb-4 border-b border-white/10 italic">Operations Log</h3>
-                                        <div className="space-y-6 max-h-[600px] overflow-y-auto custom-scroll pr-2">
-                                            {services.sort((a,b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0)).map(s => (
-                                                <div key={s.id} className="group relative pr-5 border-r border-white/10 hover:border-emerald-500 transition-all">
-                                                    <div className={`absolute -right-[4.5px] top-0 w-2 h-2 rounded-full ${s.status === 'تم التنفيذ' ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : 'bg-amber-500'}`}></div>
-                                                    <div className="flex justify-between items-start">
-                                                        <div>
-                                                            <p className="text-[10px] font-black text-white/90 uppercase">{s.userName}</p>
-                                                            <p className="text-[11px] font-bold text-emerald-400 mt-0.5">{s.name} | {s.price}ج</p>
-                                                            <p className="text-[8px] text-white/30 font-bold italic mt-2">عبر: {s.marketerName || 'مباشر'}</p>
-                                                        </div>
-                                                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                                                            <button onClick={() => { setEditingServiceId(s.id); setServiceForm({name: s.name, price: s.price, status: s.status}); setShowServiceModal(true); }} className="text-blue-400 p-1"><i className="fas fa-pen text-[10px]"></i></button>
-                                                            <button onClick={async () => { if(confirm("حذف؟")) await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('services').doc(s.id).delete(); }} className="text-red-400 p-1"><i className="fas fa-trash text-[10px]"></i></button>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        ) : (
-                            /* واجهة المسوق */
-                            <div className="space-y-10">
-                                <div className="bg-emerald-600 p-12 rounded-[55px] text-white shadow-2xl relative overflow-hidden">
-                                    <div className="absolute right-0 top-0 w-64 h-64 bg-white/10 rounded-full translate-x-1/2 -translate-y-1/2"></div>
-                                    <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-60 mb-2">My Total Commission</p>
-                                    <h2 className="text-6xl font-black mb-8 italic">{(dbUser.commissionBalance || 0).toFixed(0)} <span className="text-xl opacity-40 font-normal">EGP</span></h2>
-                                    <button onClick={() => setShowWithdrawModal(true)} className="bg-white text-emerald-600 px-10 py-5 rounded-[25px] font-black text-lg shadow-xl active:scale-95 transition-all">سحب الأرباح الآن 💸</button>
-                                </div>
-
-                                <div className="bg-white rounded-[40px] shadow-sm border border-slate-100 overflow-hidden">
-                                    <div className="p-8 border-b bg-slate-50 flex justify-between items-center">
-                                        <h3 className="font-black text-xl italic uppercase tracking-tighter">Network Activity</h3>
-                                        <button className="bg-slate-900 text-white px-6 py-2 rounded-xl text-[10px] font-black" onClick={() => {
-                                            const link = `${window.location.origin}/?ref=${dbUser.uid || dbUser.id}`;
-                                            navigator.clipboard.writeText(link);
-                                            alert("تم نسخ رابطك الشخصي!");
-                                        }}>نسخ رابط الإحالة</button>
-                                    </div>
-                                    <div className="p-8 space-y-4">
-                                        {allUsers.filter(u => u.referredBy === (dbUser.uid || dbUser.id)).map(u => (
-                                            <div key={u.id} className="bg-slate-50 p-6 rounded-3xl flex justify-between items-center">
-                                                <div>
-                                                    <p className="font-black text-slate-800">{u.name}</p>
-                                                    <p className="text-[10px] text-slate-400 font-bold">{u.phone}</p>
                                                 </div>
                                                 <div className="flex gap-2">
-                                                    {services.filter(s => s.userId === u.id || s.userId === u.uid).map(s => (
-                                                        <span key={s.id} className={`text-[9px] font-black px-2 py-1 rounded border ${s.status === 'تم التنفيذ' ? 'bg-emerald-100 text-emerald-600 border-emerald-200' : 'bg-white text-slate-300 border-slate-100'}`}>
-                                                            {s.name}
-                                                        </span>
-                                                    ))}
+                                                    <button onClick={() => { setSelectedTargetUser(u); setShowServiceModal(true); }} className="bg-slate-800 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-emerald-600 transition-colors">إضافة خدمة</button>
+                                                    <button onClick={() => window.open(`https://wa.me/2${u.phone}`)} className="bg-emerald-50 text-emerald-600 w-10 h-10 rounded-xl flex items-center justify-center hover:bg-emerald-100"><i className="fab fa-whatsapp"></i></button>
                                                 </div>
                                             </div>
                                         ))}
-                                        {allUsers.filter(u => u.referredBy === (dbUser.uid || dbUser.id)).length === 0 && <p className="text-center text-slate-300 py-10 font-bold italic opacity-40">لا يوجد إحالات مسجلة بعد.</p>}
                                     </div>
                                 </div>
                             </div>
-                        )}
-                    </div>
 
-                    {/* Service Modal */}
-                    {showServiceModal && (
-                        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[100] flex items-center justify-center p-6 text-right">
-                            <div className="bg-white rounded-[45px] p-10 w-full max-w-lg shadow-2xl">
-                                <h3 className="text-2xl font-black mb-1 text-slate-900 uppercase italic tracking-tighter">Manage Operation</h3>
-                                <p className="text-slate-400 font-bold mb-8 text-xs">Target: {selectedTargetUser?.name || 'Service Edit'}</p>
-                                <div className="space-y-5">
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] font-black text-slate-400 uppercase pr-2">اسم الخدمة</label>
-                                        <input className="w-full p-5 bg-slate-50 rounded-3xl outline-none font-bold border-2 border-transparent focus:border-emerald-500 transition-all" value={serviceForm.name} onChange={e => setServiceForm({...serviceForm, name: e.target.value})}/>
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] font-black text-slate-400 uppercase pr-2">سعر التعاقد (ج)</label>
-                                        <input className="w-full p-5 bg-slate-50 rounded-3xl outline-none font-bold text-emerald-600 text-2xl text-center border-2 border-transparent focus:border-emerald-500" type="number" value={serviceForm.price} onChange={e => setServiceForm({...serviceForm, price: e.target.value})}/>
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] font-black text-slate-400 uppercase pr-2">الحالة</label>
-                                        <select className="w-full p-5 bg-slate-50 rounded-3xl outline-none font-bold border-2 border-transparent focus:border-emerald-500 transition-all" value={serviceForm.status} onChange={e => setServiceForm({...serviceForm, status: e.target.value})}>
-                                            <option>جارية</option><option>تم التنفيذ</option><option>تم الرفض</option>
-                                        </select>
-                                    </div>
-                                    <div className="flex gap-4 pt-6">
-                                        <button onClick={handleServiceSubmit} className="flex-1 py-5 bg-slate-900 text-white rounded-3xl font-black shadow-xl active:scale-95 transition-all">حفظ</button>
-                                        <button onClick={() => setShowServiceModal(false)} className="px-8 py-5 bg-slate-100 text-slate-400 rounded-3xl font-black">إلغاء</button>
+                            {/* Activity Log */}
+                            <div className="lg:col-span-4">
+                                <div className="modern-card p-6 h-full">
+                                    <h3 className="font-black text-lg mb-6 border-b pb-4">آخر العمليات</h3>
+                                    <div className="space-y-6 overflow-y-auto max-h-[550px] custom-scroll pr-2">
+                                        {services.sort((a,b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0)).map(s => (
+                                            <div key={s.id} className="relative pr-4 border-r-2 border-slate-100">
+                                                <div className={`absolute -right-[7px] top-0 w-3 h-3 rounded-full border-2 border-white ${s.status === 'تم التنفيذ' ? 'bg-emerald-500' : 'bg-amber-400'}`}></div>
+                                                <p className="text-xs font-black text-slate-800">{s.userName}</p>
+                                                <p className="text-[11px] font-bold text-emerald-600">{s.name} - {s.price}ج</p>
+                                                <p className="text-[9px] text-slate-400 mt-1 uppercase">بواسطة: {s.marketerName}</p>
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
                             </div>
                         </div>
-                    )}
+                    </main>
 
-                    {/* Withdraw Modal */}
-                    {showWithdrawModal && (
-                        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[100] flex items-center justify-center p-6 text-right">
-                            <div className="bg-white rounded-[45px] p-12 w-full max-w-lg shadow-2xl">
-                                <h3 className="text-2xl font-black mb-8 text-slate-900 uppercase italic">Withdraw Balance</h3>
-                                <div className="space-y-6">
-                                    <input className="w-full p-5 bg-slate-50 rounded-3xl outline-none font-black text-center text-4xl text-emerald-600" type="number" placeholder="00.0" value={withdrawForm.amount} onChange={e => setWithdrawForm({...withdrawForm, amount: e.target.value})}/>
-                                    <input className="w-full p-5 bg-slate-50 rounded-3xl outline-none font-bold text-center tracking-widest" placeholder="رقم المحفظة" value={withdrawForm.number} onChange={e => setWithdrawForm({...withdrawForm, number: e.target.value})}/>
-                                    <select className="w-full p-5 bg-slate-50 rounded-3xl outline-none font-bold text-center" value={withdrawForm.method} onChange={e => setWithdrawForm({...withdrawForm, method: e.target.value})}>
-                                        <option value="Vodafone Cash">Vodafone Cash</option>
-                                        <option value="InstaPay">InstaPay</option>
+                    {/* Service Modal */}
+                    {showServiceModal && (
+                        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                            <div className="bg-white rounded-[32px] p-8 w-full max-w-md shadow-2xl animate-in zoom-in-95 duration-200">
+                                <h3 className="text-xl font-black mb-6 flex items-center gap-3">
+                                    <i className="fas fa-plus-circle text-emerald-600"></i> تسجيل خدمة جديدة
+                                </h3>
+                                <div className="space-y-4">
+                                    <div className="bg-emerald-50 p-4 rounded-2xl mb-4 border border-emerald-100">
+                                        <p className="text-[10px] font-bold text-emerald-600 uppercase">العميل المستهدف</p>
+                                        <p className="font-black text-emerald-900">{selectedTargetUser?.name}</p>
+                                    </div>
+                                    <input className="w-full p-4 rounded-2xl bg-slate-50 text-sm font-bold" placeholder="اسم الخدمة (مثال: تصميم شعار)" value={serviceForm.name} onChange={e => setServiceForm({...serviceForm, name: e.target.value})} />
+                                    <input className="w-full p-4 rounded-2xl bg-slate-50 text-sm font-bold" placeholder="السعر" type="number" onChange={e => setServiceForm({...serviceForm, price: e.target.value})} />
+                                    <select className="w-full p-4 rounded-2xl bg-slate-50 text-sm font-bold" onChange={e => setServiceForm({...serviceForm, status: e.target.value})}>
+                                        <option>جارية</option><option>تم التنفيذ</option><option>تم الرفض</option>
                                     </select>
-                                    <button onClick={submitWithdrawRequest} className="w-full py-5 bg-emerald-500 text-white rounded-3xl font-black text-lg shadow-xl active:scale-95 transition-all">إرسال طلب السحب</button>
-                                    <button onClick={() => setShowWithdrawModal(false)} className="w-full py-3 text-slate-300 font-bold uppercase text-[10px] tracking-widest mt-2">Close</button>
+                                    <div className="flex gap-3 mt-6">
+                                        <button className="flex-1 py-4 bg-emerald-600 text-white rounded-2xl font-bold" onClick={() => setShowServiceModal(false)}>حفظ الخدمة</button>
+                                        <button className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-2xl font-bold" onClick={() => setShowServiceModal(false)}>إلغاء</button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
