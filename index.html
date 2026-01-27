@@ -1,244 +1,33 @@
-<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>لوحة التحكم | داتا بريدج برو</title>
-    
-    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
-    
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
+useEffect(() => {
+    if (step === 'dashboard' && dbUser) {
+        const baseRef = db.collection('artifacts').doc(appId).collection('public').doc('data');
+        
+        // جلب المستخدمين مع الفلترة
+        const unsubUsers = baseRef.collection('users').onSnapshot(snap => {
+            const fetchedUsers = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            
+            if (dbUser.role?.toLowerCase() === 'admin') {
+                // الأدمن يرى الجميع
+                setAllUsers(fetchedUsers);
+            } else {
+                // المسوق يرى فقط من يحمل معرفه في حقل referredBy
+                const myTree = fetchedUsers.filter(u => u.referredBy === (dbUser.uid || dbUser.id));
+                setAllUsers(myTree);
+            }
+        });
 
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+        // جلب الخدمات مع الفلترة
+        const unsubServices = baseRef.collection('services').onSnapshot(snap => {
+            const fetchedServices = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            
+            if (dbUser.role?.toLowerCase() === 'admin') {
+                setServices(fetchedServices);
+            } else {
+                // المسوق يرى فقط الخدمات الخاصة بعملائه
+                setServices(fetchedServices.filter(s => s.marketerId === (dbUser.uid || dbUser.id)));
+            }
+        });
 
-    <style>
-        body { font-family: 'Cairo', sans-serif; background-color: #f1f5f9; color: #1e293b; }
-        .modern-card { background: white; border-radius: 24px; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
-        .stat-icon { background: linear-gradient(135deg, #10b981, #059669); color: white; }
-        .nav-link-active { border-bottom: 3px solid #10b981; color: #10b981; }
-        .glass-header { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(10px); border-bottom: 1px solid #e2e8f0; }
-        input, select { border: 1.5px solid #e2e8f0 !important; transition: all 0.2s; }
-        input:focus, select:focus { border-color: #10b981 !important; outline: none; ring: 2px ring-emerald-100; }
-        .custom-scroll::-webkit-scrollbar { width: 5px; }
-        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-    </style>
-</head>
-<body>
-    <div id="root"></div>
-
-    <script type="text/babel">
-        const { useState, useEffect, useMemo } = React;
-
-        const firebaseConfig = {
-            apiKey: "AIzaSyCic2l0BP5h6sEiPxPkVO7A6RaIVr77BIA",
-            authDomain: "data-bridge-dd630.firebaseapp.com",
-            projectId: "data-bridge-dd630",
-            storageBucket: "data-bridge-dd630.firebasestorage.app",
-            messagingSenderId: "314199405184",
-            appId: "1:314199405184:web:8a7bb62163c5e0e7eaec65"
-        };
-
-        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-        const auth = firebase.auth();
-        const db = firebase.firestore();
-        const appId = "data-bridge";
-
-        function App() {
-            const [dbUser, setDbUser] = useState(null);
-            const [loading, setLoading] = useState(true);
-            const [step, setStep] = useState('auth-email'); 
-            const [email, setEmail] = useState('');
-            const [password, setPassword] = useState('');
-            const [error, setError] = useState('');
-            const [allUsers, setAllUsers] = useState([]);
-            const [services, setServices] = useState([]);
-            const [withdrawals, setWithdrawals] = useState([]);
-            const [showServiceModal, setShowServiceModal] = useState(false);
-            const [selectedTargetUser, setSelectedTargetUser] = useState(null);
-            const [serviceForm, setServiceForm] = useState({ name: '', price: '', status: 'جارية' });
-
-            useEffect(() => {
-                const init = async () => {
-                    try {
-                        await auth.signInAnonymously();
-                        const saved = localStorage.getItem('db_ops_session_v5');
-                        if (saved) {
-                            const parsed = JSON.parse(saved);
-                            setDbUser(parsed);
-                            setStep('dashboard');
-                        }
-                        setLoading(false);
-                    } catch (e) { setError("فشل الاتصال بالسيرفر"); setLoading(false); }
-                };
-                init();
-            }, []);
-
-            useEffect(() => {
-                if (step === 'dashboard' && dbUser) {
-                    const baseRef = db.collection('artifacts').doc(appId).collection('public').doc('data');
-                    const unsubUsers = baseRef.collection('users').onSnapshot(snap => setAllUsers(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
-                    const unsubServices = baseRef.collection('services').onSnapshot(snap => setServices(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
-                    const unsubWithdraw = baseRef.collection('withdrawals').onSnapshot(snap => setWithdrawals(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
-                    return () => { unsubUsers(); unsubServices(); unsubWithdraw(); };
-                }
-            }, [step]);
-
-            const checkEmail = async () => {
-                setError(''); setLoading(true);
-                try {
-                    const snap = await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('users').where('email', '==', email.trim().toLowerCase()).get();
-                    if (snap.empty) {
-                        setError('الإيميل غير مسجل');
-                    } else {
-                        const doc = snap.docs[0];
-                        setDbUser({ ...doc.data(), uid: doc.id });
-                        setStep(doc.data().dashboardPassword ? 'auth-password' : 'setup-password');
-                    }
-                } catch (e) { setError('حدث خطأ'); }
-                setLoading(false);
-            };
-
-            const handleLogout = () => {
-                localStorage.removeItem('db_ops_session_v5');
-                window.location.reload();
-            };
-
-            const stats = useMemo(() => ({
-                sales: services.filter(s => s.status === 'تم التنفيذ').reduce((acc, curr) => acc + (curr.price || 0), 0),
-                users: allUsers.length,
-                pendingWithdraw: withdrawals.filter(w => w.status === 'معلق').length
-            }), [services, allUsers, withdrawals]);
-
-            if (loading) return <div className="h-screen flex items-center justify-center bg-white text-emerald-600 font-bold">جاري تحميل داتا بريدج...</div>;
-
-            if (step !== 'dashboard') return (
-                <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-                    <div className="bg-white p-12 rounded-[40px] shadow-xl w-full max-w-md text-center border border-slate-200">
-                        <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-6"><i className="fas fa-shield-halved text-2xl"></i></div>
-                        <h1 className="text-2xl font-black mb-6">دخول العمليات</h1>
-                        {error && <div className="bg-red-50 text-red-500 p-3 rounded-xl mb-4 text-sm font-bold">{error}</div>}
-                        <input type="email" className="w-full p-4 rounded-2xl bg-slate-50 mb-4 text-center" placeholder="البريد الإلكتروني" onChange={e => setEmail(e.target.value)} />
-                        {step !== 'auth-email' && <input type="password" title="pass" className="w-full p-4 rounded-2xl bg-slate-50 mb-4 text-center" placeholder="كلمة السر" onChange={e => setPassword(e.target.value)} />}
-                        <button onClick={step === 'auth-email' ? checkEmail : () => setStep('dashboard')} className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold shadow-lg shadow-emerald-200">متابعة</button>
-                    </div>
-                </div>
-            );
-
-            return (
-                <div className="min-h-screen">
-                    <header className="glass-header sticky top-0 z-40 px-6 py-4 flex justify-between items-center">
-                        <div className="flex items-center gap-3">
-                            <div className="bg-emerald-600 p-2 rounded-lg text-white"><i className="fas fa-cubes"></i></div>
-                            <h2 className="font-black text-xl tracking-tight text-slate-800">DATA BRIDGE <span className="text-emerald-600">OPS</span></h2>
-                        </div>
-                        <div className="flex items-center gap-4">
-                            <span className="text-sm font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full">{dbUser.name}</span>
-                            <button onClick={handleLogout} className="text-red-500 hover:bg-red-50 w-10 h-10 rounded-full transition-colors"><i className="fas fa-power-off"></i></button>
-                        </div>
-                    </header>
-
-                    <main className="max-w-7xl mx-auto p-6 lg:p-10">
-                        {/* Stats Summary */}
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-                            {[
-                                { title: 'إجمالي المبيعات', val: stats.sales + ' ج.م', icon: 'fa-sack-dollar', color: 'text-emerald-600' },
-                                { title: 'قاعدة العملاء', val: stats.users + ' مستخدم', icon: 'fa-users', color: 'text-blue-600' },
-                                { title: 'طلبات سحب معلقة', val: stats.pendingWithdraw, icon: 'fa-hand-holding-dollar', color: 'text-amber-500' }
-                            ].map((s, i) => (
-                                <div key={i} className="modern-card p-8 flex items-center justify-between">
-                                    <div>
-                                        <p className="text-sm font-bold text-slate-400 mb-1">{s.title}</p>
-                                        <h3 className={`text-2xl font-black ${s.color}`}>{s.val}</h3>
-                                    </div>
-                                    <div className="w-14 h-14 rounded-2xl bg-slate-50 flex items-center justify-center text-xl text-slate-400"><i className={`fas ${s.icon}`}></i></div>
-                                </div>
-                            ))}
-                        </div>
-
-                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                            {/* User List */}
-                            <div className="lg:col-span-8">
-                                <div className="modern-card overflow-hidden">
-                                    <div className="p-6 border-b bg-slate-50/50 flex justify-between items-center">
-                                        <h3 className="font-black text-lg">إدارة المستخدمين</h3>
-                                        <div className="text-[10px] font-black bg-emerald-100 text-emerald-700 px-2 py-1 rounded">MASTER DIRECTORY</div>
-                                    </div>
-                                    <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto custom-scroll">
-                                        {allUsers.map(u => (
-                                            <div key={u.id} className="p-5 flex justify-between items-center hover:bg-slate-50 transition-colors">
-                                                <div className="flex items-center gap-4">
-                                                    <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center font-bold text-slate-500 uppercase">{u.name?.charAt(0)}</div>
-                                                    <div>
-                                                        <h4 className="font-bold text-slate-800">{u.name}</h4>
-                                                        <p className="text-xs text-slate-400">{u.email} | {u.phone || 'بدون رقم'}</p>
-                                                    </div>
-                                                </div>
-                                                <div className="flex gap-2">
-                                                    <button onClick={() => { setSelectedTargetUser(u); setShowServiceModal(true); }} className="bg-slate-800 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-emerald-600 transition-colors">إضافة خدمة</button>
-                                                    <button onClick={() => window.open(`https://wa.me/2${u.phone}`)} className="bg-emerald-50 text-emerald-600 w-10 h-10 rounded-xl flex items-center justify-center hover:bg-emerald-100"><i className="fab fa-whatsapp"></i></button>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Activity Log */}
-                            <div className="lg:col-span-4">
-                                <div className="modern-card p-6 h-full">
-                                    <h3 className="font-black text-lg mb-6 border-b pb-4">آخر العمليات</h3>
-                                    <div className="space-y-6 overflow-y-auto max-h-[550px] custom-scroll pr-2">
-                                        {services.sort((a,b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0)).map(s => (
-                                            <div key={s.id} className="relative pr-4 border-r-2 border-slate-100">
-                                                <div className={`absolute -right-[7px] top-0 w-3 h-3 rounded-full border-2 border-white ${s.status === 'تم التنفيذ' ? 'bg-emerald-500' : 'bg-amber-400'}`}></div>
-                                                <p className="text-xs font-black text-slate-800">{s.userName}</p>
-                                                <p className="text-[11px] font-bold text-emerald-600">{s.name} - {s.price}ج</p>
-                                                <p className="text-[9px] text-slate-400 mt-1 uppercase">بواسطة: {s.marketerName}</p>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </main>
-
-                    {/* Service Modal */}
-                    {showServiceModal && (
-                        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                            <div className="bg-white rounded-[32px] p-8 w-full max-w-md shadow-2xl animate-in zoom-in-95 duration-200">
-                                <h3 className="text-xl font-black mb-6 flex items-center gap-3">
-                                    <i className="fas fa-plus-circle text-emerald-600"></i> تسجيل خدمة جديدة
-                                </h3>
-                                <div className="space-y-4">
-                                    <div className="bg-emerald-50 p-4 rounded-2xl mb-4 border border-emerald-100">
-                                        <p className="text-[10px] font-bold text-emerald-600 uppercase">العميل المستهدف</p>
-                                        <p className="font-black text-emerald-900">{selectedTargetUser?.name}</p>
-                                    </div>
-                                    <input className="w-full p-4 rounded-2xl bg-slate-50 text-sm font-bold" placeholder="اسم الخدمة (مثال: تصميم شعار)" value={serviceForm.name} onChange={e => setServiceForm({...serviceForm, name: e.target.value})} />
-                                    <input className="w-full p-4 rounded-2xl bg-slate-50 text-sm font-bold" placeholder="السعر" type="number" onChange={e => setServiceForm({...serviceForm, price: e.target.value})} />
-                                    <select className="w-full p-4 rounded-2xl bg-slate-50 text-sm font-bold" onChange={e => setServiceForm({...serviceForm, status: e.target.value})}>
-                                        <option>جارية</option><option>تم التنفيذ</option><option>تم الرفض</option>
-                                    </select>
-                                    <div className="flex gap-3 mt-6">
-                                        <button className="flex-1 py-4 bg-emerald-600 text-white rounded-2xl font-bold" onClick={() => setShowServiceModal(false)}>حفظ الخدمة</button>
-                                        <button className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-2xl font-bold" onClick={() => setShowServiceModal(false)}>إلغاء</button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            );
-        }
-
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
-</body>
-</html>
+        // ... بقية الـ Snapshots (السحوبات) ...
+    }
+}, [step, dbUser.role]);
